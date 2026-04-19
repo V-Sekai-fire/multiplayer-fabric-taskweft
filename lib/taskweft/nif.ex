@@ -36,4 +36,10 @@ defmodule Taskweft.NIF do
   def bridge_extract_entities(_state_json), do: :erlang.nif_error(:not_loaded)
   def bridge_plan_contents(_plan_json, _domain, _entities_json), do: :erlang.nif_error(:not_loaded)
   def bridge_state_bindings(_state_json, _domain, _category), do: :erlang.nif_error(:not_loaded)
+
+  def rebac_can(_graph_json, _subj, _capability, _max_depth), do: :erlang.nif_error(:not_loaded)
+  def rebac_get_entity_capabilities(_graph_json, _entity), do: :erlang.nif_error(:not_loaded)
+  def rebac_get_entities_with_capability(_graph_json, _capability), do: :erlang.nif_error(:not_loaded)
+
+  def mc_execute(_domain_json, _plan_json, _probs_json, _seed), do: :erlang.nif_error(:not_loaded)
 end

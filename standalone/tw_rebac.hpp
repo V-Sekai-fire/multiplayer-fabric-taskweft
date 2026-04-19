@@ -239,6 +239,120 @@ inline std::vector<std::string> tw_expand(const TwReBACGraph &p_g,
 	return std::vector<std::string>(result.begin(), result.end());
 }
 
+// ---- can: DFS capability traversal ----------------------------------------
+// Port of ReBACEngine._find_path / can() from capabilities.py.
+// Terminal edges: HAS_CAPABILITY, CONTROLS, OWNS.
+// Intermediate hops follow any edge type.
+// Returns path as vector<string>; empty = not authorized.
+
+inline bool _rebac_dfs(const TwReBACGraph &p_g,
+		const std::string &p_current,
+		const std::string &p_target,
+		std::unordered_set<std::string> &p_visited,
+		std::vector<std::string> &p_path,
+		int p_depth) {
+	if (p_depth <= 0) {
+		return false;
+	}
+	if (p_current == p_target) {
+		p_path.push_back(p_current);
+		return true;
+	}
+	if (p_visited.count(p_current)) {
+		return false;
+	}
+	p_visited.insert(p_current);
+
+	auto sit = p_g.subj_idx.find(p_current);
+	if (sit == p_g.subj_idx.end()) {
+		return false;
+	}
+
+	// Terminal edges
+	for (size_t idx : sit->second) {
+		const TwEdge &e = p_g.edges[idx];
+		if (e.object == p_target &&
+				(e.rel == RelationType::HAS_CAPABILITY ||
+				 e.rel == RelationType::CONTROLS ||
+				 e.rel == RelationType::OWNS)) {
+			p_path.push_back(p_current);
+			p_path.push_back(std::string("[") + rel_str(e.rel) + "]");
+			p_path.push_back(p_target);
+			return true;
+		}
+	}
+
+	// Recursive hops via any edge
+	for (size_t idx : sit->second) {
+		const TwEdge &e = p_g.edges[idx];
+		std::vector<std::string> sub_path;
+		std::unordered_set<std::string> sub_visited = p_visited;
+		if (_rebac_dfs(p_g, e.object, p_target, sub_visited, sub_path, p_depth - 1)) {
+			p_path.push_back(p_current);
+			p_path.push_back(std::string("[") + rel_str(e.rel) + "]");
+			for (size_t i = 1; i < sub_path.size(); ++i) {
+				p_path.push_back(sub_path[i]);
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+// rebac_can_json(graph, subj, capability, max_depth) → JSON {"authorized":bool,"path":[...]}
+inline std::string rebac_can_json(const TwReBACGraph &p_g,
+		const std::string &p_subj,
+		const std::string &p_capability,
+		int p_max_depth) {
+	std::unordered_set<std::string> visited;
+	std::vector<std::string> path;
+	bool found = _rebac_dfs(p_g, p_subj, p_capability, visited, path, p_max_depth);
+
+	std::ostringstream oss;
+	oss << "{\"authorized\":" << (found ? "true" : "false") << ",\"path\":[";
+	for (size_t i = 0; i < path.size(); ++i) {
+		if (i) { oss << ','; }
+		oss << TwJson::escape_string(path[i]);
+	}
+	oss << "]}";
+	return oss.str();
+}
+
+// ---- EntityCapabilities helpers -------------------------------------------
+// get_entity_capabilities: all HAS_CAPABILITY objects for a subject.
+inline std::vector<std::string> get_entity_capabilities(const TwReBACGraph &p_g,
+		const std::string &p_entity) {
+	std::vector<std::string> result;
+	auto sit = p_g.subj_idx.find(p_entity);
+	if (sit == p_g.subj_idx.end()) {
+		return result;
+	}
+	for (size_t idx : sit->second) {
+		const TwEdge &e = p_g.edges[idx];
+		if (e.rel == RelationType::HAS_CAPABILITY) {
+			result.push_back(e.object);
+		}
+	}
+	return result;
+}
+
+// get_entities_with_capability: all subjects with HAS_CAPABILITY to object.
+inline std::vector<std::string> get_entities_with_capability(const TwReBACGraph &p_g,
+		const std::string &p_capability) {
+	std::vector<std::string> result;
+	auto oit = p_g.obj_idx.find(p_capability);
+	if (oit == p_g.obj_idx.end()) {
+		return result;
+	}
+	for (size_t idx : oit->second) {
+		const TwEdge &e = p_g.edges[idx];
+		if (e.rel == RelationType::HAS_CAPABILITY) {
+			result.push_back(e.subject);
+		}
+	}
+	return result;
+}
+
 // ---- JSON serialization / deserialization --------------------------------
 
 inline TwReBACGraph graph_from_json(const std::string &p_json) {

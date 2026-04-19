@@ -3,6 +3,7 @@
 #include "tw_hrr.hpp"
 #include "tw_json.hpp"
 #include "tw_loader.hpp"
+#include "tw_mc_executor.hpp"
 #include "tw_planner.hpp"
 #include "tw_rebac.hpp"
 #include "tw_replan.hpp"
@@ -284,5 +285,38 @@ std::string bridge_state_bindings(ErlNifEnv *p_env, std::string p_state_json,
 	return TwBridge::state_bindings_contents(p_state_json, p_domain, p_category);
 }
 FINE_NIF(bridge_state_bindings, 0);
+
+// rebac_can(graph_json, subj, capability, max_depth) → JSON {"authorized":bool,"path":[...]}
+// DFS traversal: terminal via HAS_CAPABILITY, CONTROLS, OWNS.
+std::string rebac_can(ErlNifEnv *p_env, std::string p_graph_json,
+		std::string p_subj, std::string p_capability, int64_t p_max_depth) {
+	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	return TwReBAC::rebac_can_json(g, p_subj, p_capability, static_cast<int>(p_max_depth));
+}
+FINE_NIF(rebac_can, 0);
+
+// rebac_get_entity_capabilities(graph_json, entity) → list of capability strings
+std::vector<std::string> rebac_get_entity_capabilities(ErlNifEnv *p_env,
+		std::string p_graph_json, std::string p_entity) {
+	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	return TwReBAC::get_entity_capabilities(g, p_entity);
+}
+FINE_NIF(rebac_get_entity_capabilities, 0);
+
+// rebac_get_entities_with_capability(graph_json, capability) → list of entity strings
+std::vector<std::string> rebac_get_entities_with_capability(ErlNifEnv *p_env,
+		std::string p_graph_json, std::string p_capability) {
+	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	return TwReBAC::get_entities_with_capability(g, p_capability);
+}
+FINE_NIF(rebac_get_entities_with_capability, 0);
+
+// mc_execute(domain_json, plan_json, probs_json, seed) → trace JSON
+// Stochastic plan execution with per-step success probabilities.
+std::string mc_execute(ErlNifEnv *p_env, std::string p_domain_json,
+		std::string p_plan_json, std::string p_probs_json, int64_t p_seed) {
+	return TwMCExecutor::mc_execute(p_domain_json, p_plan_json, p_probs_json, p_seed);
+}
+FINE_NIF(mc_execute, 0);
 
 FINE_INIT("Elixir.Taskweft.NIF");
