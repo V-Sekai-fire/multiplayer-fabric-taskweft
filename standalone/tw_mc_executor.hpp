@@ -80,37 +80,29 @@ inline std::string mc_execute(const std::string &p_domain_json,
 		double draw = dist(rng);
 		bool succeeded = (draw < prob);
 
-		TwValue::Dict step_dict;
-		step_dict["action"] = step;
-		step_dict["succeeded"] = TwValue(succeeded);
-
+		// Apply action if the step was drawn as successful
 		if (succeeded) {
-			// Apply action
 			auto ait = loaded.domain.actions.find(action_name);
 			if (ait != loaded.domain.actions.end()) {
 				std::shared_ptr<TwState> new_state = ait->second(state->copy(), args);
-				if (new_state) {
-					state = new_state;
-					// Serialize resulting state to JSON
-					TwValue::Dict state_dict;
-					for (const auto &[k, v] : state->vars) {
-						state_dict[k] = v;
-					}
-					step_dict["state_json"] = TwValue(TwJson::to_json(TwValue(std::move(state_dict))));
-				} else {
+				if (!new_state) {
 					// Action function returned nullptr → treat as failure
 					succeeded = false;
-					step_dict["succeeded"] = TwValue(false);
-					step_dict["state_json"] = TwValue(); // null
+				} else {
+					state = new_state;
 				}
-			} else {
-				// Unknown action — record as succeeded with current state unchanged
-				TwValue::Dict state_dict;
-				for (const auto &[k, v] : state->vars) {
-					state_dict[k] = v;
-				}
-				step_dict["state_json"] = TwValue(TwJson::to_json(TwValue(std::move(state_dict))));
 			}
+		}
+
+		TwValue::Dict step_dict;
+		step_dict["action"] = step;
+		step_dict["succeeded"] = TwValue(succeeded);
+		if (succeeded) {
+			TwValue::Dict state_dict;
+			for (const auto &[k, v] : state->vars) {
+				state_dict[k] = v;
+			}
+			step_dict["state_json"] = TwValue(TwJson::to_json(TwValue(std::move(state_dict))));
 		} else {
 			step_dict["state_json"] = TwValue(); // null
 		}

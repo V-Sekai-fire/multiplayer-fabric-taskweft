@@ -10,11 +10,6 @@ defmodule Taskweft.PlannerPropTest do
     oneof(Enum.map(files, &exactly/1))
   end
 
-  def problem_file_gen do
-    files = File.ls!(@problems_dir) |> Enum.filter(&String.ends_with?(&1, ".jsonld"))
-    oneof(Enum.map(files, &exactly/1))
-  end
-
   # --- plan/1 ---
 
   property "plan: returns ok or no_plan — never crashes on valid domain" do

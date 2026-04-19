@@ -19,11 +19,12 @@ defmodule Taskweft.MCExecutor do
   Returns `{:ok, trace_json}` or `{:error, reason}`.
   """
   def execute(domain_json, plan_json, probs_json \\ "[]", seed \\ 10) do
-    result = NIF.mc_execute(domain_json, plan_json, probs_json, seed)
-    case Jason.decode(result) do
-      {:ok, %{"error" => reason}} -> {:error, reason}
-      {:ok, trace} -> {:ok, Jason.encode!(trace)}
-      {:error, _} -> {:error, "invalid_json"}
+    json = NIF.mc_execute(domain_json, plan_json, probs_json, seed)
+    case Jason.decode!(json) do
+      %{"error" => reason} -> {:error, reason}
+      _ -> {:ok, json}
     end
+  rescue
+    _ -> {:error, "invalid_json"}
   end
 end

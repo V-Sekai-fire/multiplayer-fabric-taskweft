@@ -9,15 +9,7 @@ defmodule Taskweft.MCExecutorPropTest do
     Path.join([__DIR__, "../../priv/plans/domains/blocks_world.jsonld"])
   )
 
-  def step_gen, do: oneof([exactly("move"), exactly("pickup"), exactly("putdown")])
-  def name_gen, do: oneof([exactly("a"), exactly("b"), exactly("c")])
   def prob_gen, do: let(n <- range(0, 100), do: n / 100.0)
-
-  # Simple 1-step plan JSON that at minimum parses correctly
-  def plan_json(action, args) do
-    args_json = Enum.map_join(args, ",", &~s("#{&1}"))
-    ~s([["#{action}",#{args_json}]])
-  end
 
   property "execute: returns {:ok, json} or {:error, _} — never crashes" do
     forall {seed, prob} <- {range(0, 9999), prob_gen()} do
