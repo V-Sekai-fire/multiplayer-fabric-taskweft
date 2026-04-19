@@ -1,3 +1,9 @@
+# Elixir/Mix
+/_build/
+/deps/
+/priv/libtaskweft_nif.so
+*.beam
+
 # CLI build directories
 cli/.build_native/
 cli/.build_riscv/
