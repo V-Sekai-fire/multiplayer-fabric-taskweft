@@ -16,6 +16,9 @@ cli/taskweft_riscv64
 lean/.lake/
 lean/lake-packages/
 
+# Erlang crash dumps
+erl_crash.dump
+
 # Python cache
 __pycache__/
 *.pyc
