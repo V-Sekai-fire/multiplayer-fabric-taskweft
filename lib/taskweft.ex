@@ -69,4 +69,50 @@ defmodule Taskweft do
   def hrr_similarity(a, b) do
     NIF.hrr_similarity(a, b)
   end
+
+  @doc """
+  Encode text as a bag-of-words HRR phase vector (bundle of token atoms).
+
+  Returns a list of `dim` floats (phase angles in radians).
+  """
+  def hrr_encode_text(text, dim \\ 4096) do
+    NIF.hrr_encode_text(text, dim)
+  end
+
+  @doc """
+  Encode a content-entity binding as raw bytes (little-endian float64).
+
+  Computes `encode_text(content) ⊗ encode_atom(entity.lower())`.
+  Returns a binary suitable for storage in SQLite.
+  """
+  def hrr_encode_binding(content, entity, dim \\ 4096) do
+    NIF.hrr_encode_binding(content, entity, dim)
+  end
+
+  @doc """
+  Encode a fact with role-vector bundling as raw bytes (little-endian float64).
+
+  Bundles `encode_text(content) ⊗ role_content` with per-entity
+  `encode_atom(entity) ⊗ role_entity` components.
+  Returns a binary suitable for storage in SQLite.
+  """
+  def hrr_encode_fact(content, entities, dim \\ 4096) do
+    NIF.hrr_encode_fact(content, entities, dim)
+  end
+
+  @doc """
+  Serialize a phase vector (list of floats) to raw bytes (little-endian float64).
+  """
+  def hrr_phases_to_bytes(phases) do
+    NIF.hrr_phases_to_bytes(phases)
+  end
+
+  @doc """
+  Deserialize raw bytes back to a phase vector (list of floats).
+
+  `len` is the number of phases (pass `0` to infer from binary size).
+  """
+  def hrr_bytes_to_phases(data, len \\ 0) do
+    NIF.hrr_bytes_to_phases(data, len)
+  end
 end

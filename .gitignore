@@ -12,6 +12,10 @@ cli/.build_riscv/
 cli/taskweft
 cli/taskweft_riscv64
 
+# Lean build artifacts
+lean/.lake/
+lean/lake-packages/
+
 # Python cache
 __pycache__/
 *.pyc

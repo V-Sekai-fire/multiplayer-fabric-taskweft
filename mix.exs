@@ -19,7 +19,8 @@ defmodule Taskweft.MixProject do
   defp deps do
     [
       {:fine, "~> 0.1"},
-      {:elixir_make, "~> 0.9"}
+      {:elixir_make, "~> 0.9"},
+      {:exqlite, "~> 0.23"}
     ]
   end
 end
