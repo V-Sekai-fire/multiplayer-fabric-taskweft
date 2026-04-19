@@ -12,6 +12,10 @@ defmodule Taskweft.MixProject do
     ]
   end
 
+  def cli do
+    [preferred_envs: [propcheck: :test]]
+  end
+
   def application do
     [extra_applications: [:logger]]
   end
@@ -20,7 +24,8 @@ defmodule Taskweft.MixProject do
     [
       {:fine, "~> 0.1"},
       {:elixir_make, "~> 0.9"},
-      {:exqlite, "~> 0.23"}
+      {:exqlite, "~> 0.23"},
+      {:propcheck, "~> 1.4", only: [:test, :dev], runtime: false}
     ]
   end
 end
