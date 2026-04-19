@@ -25,6 +25,7 @@ defmodule Taskweft.MixProject do
       {:fine, "~> 0.1"},
       {:elixir_make, "~> 0.9"},
       {:exqlite, "~> 0.23"},
+      {:jason, "~> 1.4"},
       {:propcheck, "~> 1.4", only: [:test, :dev], runtime: false}
     ]
   end

@@ -7,6 +7,9 @@ defmodule Taskweft do
   """
 
   alias Taskweft.NIF
+  alias Taskweft.Bridge
+  alias Taskweft.ReBAC
+  alias Taskweft.Retriever
 
   @doc """
   Run the HTN planner on a self-contained JSON-LD domain document.
@@ -114,5 +117,71 @@ defmodule Taskweft do
   """
   def hrr_bytes_to_phases(data, len \\ 0) do
     NIF.hrr_bytes_to_phases(data, len)
+  end
+
+  @doc """
+  Bind two byte-encoded phase vectors (circular addition).
+
+  Returns the result as a binary (little-endian float64 bytes).
+  """
+  def hrr_bind(a_bytes, b_bytes) do
+    NIF.hrr_bind(a_bytes, b_bytes)
+  end
+
+  @doc """
+  Unbind a bound vector given the key (exact inverse: circular subtraction).
+
+  Returns the result as a binary (little-endian float64 bytes).
+  """
+  def hrr_unbind(bound_bytes, key_bytes) do
+    NIF.hrr_unbind(bound_bytes, key_bytes)
+  end
+
+  @doc """
+  Bundle (phase-average) a list of byte-encoded phase vectors.
+
+  Returns the result as a binary (little-endian float64 bytes).
+  """
+  def hrr_bundle(vecs) do
+    NIF.hrr_bundle(vecs)
+  end
+
+  @doc """
+  ReBAC: check whether `subj` satisfies a RelationExpr against `obj`.
+
+  See `Taskweft.ReBAC` for the full API and expression format.
+  """
+  def rebac_check(graph_json, subj, expr_json, obj, fuel \\ 8) do
+    ReBAC.check(graph_json, subj, expr_json, obj, fuel)
+  end
+
+  @doc """
+  ReBAC: expand — find all subjects that hold `rel` to `obj`.
+  """
+  def rebac_expand(graph_json, rel, obj, fuel \\ 8) do
+    ReBAC.expand(graph_json, rel, obj, fuel)
+  end
+
+  @doc """
+  Hybrid retrieval scoring of candidate facts.
+
+  See `Taskweft.Retriever.score/4` for parameter details.
+  """
+  def retriever_score(candidates_json, query_text, query_hrr_bytes, opts \\ []) do
+    Retriever.score(candidates_json, query_text, query_hrr_bytes, opts)
+  end
+
+  @doc """
+  Extract entity names from a PDDL-style state JSON dict.
+  """
+  def bridge_extract_entities(state_json) do
+    Bridge.extract_entities(state_json)
+  end
+
+  @doc """
+  Convert a plan result to storable memory fact content (JSON array).
+  """
+  def bridge_plan_contents(plan_json, domain, entities_json) do
+    Bridge.plan_contents(plan_json, domain, entities_json)
   end
 end
