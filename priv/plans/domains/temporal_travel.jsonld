@@ -54,7 +54,7 @@
       "body": [
         {"check": "/loc/{person}", "eq": -1},
         {"set": "/loc/taxi1",    "value": "{to_loc}"},
-        {"set": "/owe/{person}", "value": {"op": "add", "a": 1.5, "b": {"op": "mul", "a": 0.5, "b": 8}}}
+        {"set": "/owe/{person}", "value": {"type": "math/add", "a": 1.5, "b": {"type": "math/mul", "a": 0.5, "b": 8}}}
       ]
     },
     "a_pay_driver": {
@@ -64,7 +64,7 @@
       "bind": [{"name": "owed", "pointer": "/owe/{person}"}],
       "body": [
         {"check": "/cash/{person}", "ge": "{owed}"},
-        {"set": "/cash/{person}", "value": {"op": "sub", "a": {"op": "get", "pointer": "/cash/{person}"}, "b": "{owed}"}},
+        {"set": "/cash/{person}", "value": {"type": "math/sub", "a": {"type": "pointer/get", "pointer": "/cash/{person}"}, "b": "{owed}"}},
         {"set": "/owe/{person}",  "value": 0.0},
         {"set": "/loc/{person}",  "value": "{to_loc}"}
       ]

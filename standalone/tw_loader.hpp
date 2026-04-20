@@ -2,14 +2,19 @@
 // Includes a minimal recursive-descent JSON parser and the domain builder.
 #pragma once
 #include "tw_domain.hpp"
+#include <algorithm>
+#include <bit>
 #include <cctype>
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -125,6 +130,16 @@ inline TwValue parse_json_str(const std::string &json) {
 }
 
 // ---- Expression evaluators -------------------------------------------------
+// KHR_interactivity §02 node types — tinygrad-style flat dispatch registry.
+// References:
+//   @software{tinygrad2020,
+//     author = {Hoeger, George and tinygrad contributors},
+//     title  = {tinygrad},
+//     url    = {https://github.com/tinygrad/tinygrad},
+//     year   = {2020},
+//     note   = {Op-registry dispatch pattern: flat unordered_map from type
+//               string to callable, avoiding class hierarchies.}
+//   }
 
 using Params = std::unordered_map<std::string, TwValue>;
 
@@ -161,152 +176,333 @@ inline std::pair<std::string, TwValue> parse_pointer(
 inline TwValue eval_expr(const TwValue &expr, const Params &params,
         const TwState &state, const TwValue::Dict &enums);
 
-inline TwValue eval_op(const TwValue::Dict &expr, const Params &params,
+// Resolve the KHR_interactivity node type from "type" key.
+// Accepts fully qualified "math/add" or short "add".
+inline std::string node_type(const TwValue::Dict &expr) {
+    auto it = expr.find("type");
+    if (it == expr.end() || !it->second.is_string()) return "";
+    const std::string &s = it->second.as_string();
+    auto slash = s.rfind('/');
+    return slash != std::string::npos ? s.substr(slash + 1) : s;
+}
+
+// ---- KHR_interactivity node type registry (tinygrad-style flat table) ------
+//
+// Each entry: short-name → fn(a, b, c, d) → TwValue.
+// a = get("a"), b = get("b"), c = get("c"), d = get("d") — pre-evaluated.
+// Structural nodes (get, select, clamp, mix, switch, random) handled before
+// dispatch because they require access to the full expression dict.
+//
+// Sources: KHR_interactivity 02_node_types.md (all scalar math/* and type/*).
+
+using NodeFn = std::function<TwValue(TwValue, TwValue, TwValue, TwValue)>;
+
+inline const std::unordered_map<std::string, NodeFn> &kNodeTypes() {
+    static const std::unordered_map<std::string, NodeFn> tbl = {
+        // ---- Arithmetic (float/int polymorphic) ----------------------------
+        {"add",  [](auto a, auto b, auto, auto) -> TwValue {
+            if (a.is_int() && b.is_int()) return TwValue(a.as_int() + b.as_int());
+            return TwValue(a.as_number() + b.as_number()); }},
+        {"sub",  [](auto a, auto b, auto, auto) -> TwValue {
+            if (a.is_int() && b.is_int()) return TwValue(a.as_int() - b.as_int());
+            return TwValue(a.as_number() - b.as_number()); }},
+        {"mul",  [](auto a, auto b, auto, auto) -> TwValue {
+            if (a.is_int() && b.is_int()) return TwValue(a.as_int() * b.as_int());
+            return TwValue(a.as_number() * b.as_number()); }},
+        {"div",  [](auto a, auto b, auto, auto) -> TwValue {
+            if (a.is_int() && b.is_int()) { int64_t bi = b.as_int(); return bi ? TwValue(a.as_int()/bi) : TwValue{}; }
+            double bd = b.as_number(); return bd != 0.0 ? TwValue(a.as_number()/bd) : TwValue{}; }},
+        // math/rem — truncated remainder (spec §Remainder; ECMAScript %)
+        {"rem",  [](auto a, auto b, auto, auto) -> TwValue {
+            if (a.is_int() && b.is_int()) { int64_t bi = b.as_int(); return bi ? TwValue(a.as_int()%bi) : TwValue(int64_t(0)); }
+            double bd = b.as_number(); return TwValue(bd != 0.0 ? std::fmod(a.as_number(), bd) : 0.0); }},
+        // math/fract — fractional part: a - floor(a)
+        {"fract",[](auto a, auto, auto, auto) -> TwValue {
+            double v = a.as_number(); return TwValue(v - std::floor(v)); }},
+        {"neg",  [](auto a, auto, auto, auto) -> TwValue {
+            return a.is_int() ? TwValue(-a.as_int()) : TwValue(-a.as_number()); }},
+        {"abs",  [](auto a, auto, auto, auto) -> TwValue {
+            return a.is_int() ? TwValue(std::abs(a.as_int())) : TwValue(std::abs(a.as_number())); }},
+        {"min",  [](auto a, auto b, auto, auto) -> TwValue { return a < b ? a : b; }},
+        {"max",  [](auto a, auto b, auto, auto) -> TwValue { return a > b ? a : b; }},
+        {"saturate", [](auto a, auto, auto, auto) -> TwValue {
+            double v = a.as_number(); return TwValue(v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v); }},
+
+        // ---- Sign/rounding -------------------------------------------------
+        {"sign", [](auto a, auto, auto, auto) -> TwValue {
+            if (a.is_int()) { int64_t v = a.as_int(); return TwValue(v > 0 ? int64_t(1) : v < 0 ? int64_t(-1) : int64_t(0)); }
+            double v = a.as_number(); return TwValue(v > 0.0 ? 1.0 : v < 0.0 ? -1.0 : 0.0); }},
+        {"trunc",[](auto a, auto, auto, auto) -> TwValue {
+            return a.is_int() ? a : TwValue(std::trunc(a.as_number())); }},
+        {"floor",[](auto a, auto, auto, auto) -> TwValue { return TwValue(std::floor(a.as_number())); }},
+        {"ceil", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::ceil(a.as_number())); }},
+        {"round",[](auto a, auto, auto, auto) -> TwValue {
+            double v = a.as_number(); return TwValue(v < 0.0 ? -std::round(-v) : std::round(v)); }},
+
+        // ---- Exponential / logarithmic ------------------------------------
+        {"sqrt", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::sqrt(a.as_number())); }},
+        {"cbrt", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::cbrt(a.as_number())); }},
+        {"exp",  [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::exp(a.as_number())); }},
+        {"log",  [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::log(a.as_number())); }},
+        {"log2", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::log2(a.as_number())); }},
+        {"log10",[](auto a, auto, auto, auto) -> TwValue { return TwValue(std::log10(a.as_number())); }},
+        {"pow",  [](auto a, auto b, auto, auto) -> TwValue { return TwValue(std::pow(a.as_number(), b.as_number())); }},
+
+        // ---- Comparison ---------------------------------------------------
+        {"eq",  [](auto a, auto b, auto, auto) -> TwValue { return TwValue(a == b); }},
+        {"neq", [](auto a, auto b, auto, auto) -> TwValue { return TwValue(a != b); }},
+        {"lt",  [](auto a, auto b, auto, auto) -> TwValue { return TwValue(a <  b); }},
+        {"le",  [](auto a, auto b, auto, auto) -> TwValue { return TwValue(a <= b); }},
+        {"gt",  [](auto a, auto b, auto, auto) -> TwValue { return TwValue(a >  b); }},
+        {"ge",  [](auto a, auto b, auto, auto) -> TwValue { return TwValue(a >= b); }},
+
+        // ---- Boolean (math/and, math/or, math/not, math/xor) --------------
+        {"and", [](auto a, auto b, auto, auto) -> TwValue { return TwValue(a.as_bool() && b.as_bool()); }},
+        {"or",  [](auto a, auto b, auto, auto) -> TwValue { return TwValue(a.as_bool() || b.as_bool()); }},
+        {"not", [](auto a, auto, auto, auto)   -> TwValue {
+            if (a.is_int()) return TwValue((int64_t)~(int32_t)a.as_int());  // bitwise NOT for int
+            return TwValue(!a.as_bool()); }},
+        {"xor", [](auto a, auto b, auto, auto) -> TwValue {
+            if (a.is_int() && b.is_int()) return TwValue((int64_t)((int32_t)a.as_int() ^ (int32_t)b.as_int()));
+            return TwValue(a.as_bool() != b.as_bool()); }},
+
+        // ---- Special float checks -----------------------------------------
+        {"isNaN", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::isnan(a.as_number())); }},
+        {"isInf", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::isinf(a.as_number())); }},
+
+        // ---- Trigonometry --------------------------------------------------
+        {"sin",  [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::sin(a.as_number())); }},
+        {"cos",  [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::cos(a.as_number())); }},
+        {"tan",  [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::tan(a.as_number())); }},
+        {"asin", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::asin(a.as_number())); }},
+        {"acos", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::acos(a.as_number())); }},
+        {"atan", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::atan(a.as_number())); }},
+        {"atan2",[](auto a, auto b, auto, auto) -> TwValue { return TwValue(std::atan2(a.as_number(), b.as_number())); }},
+        {"sinh", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::sinh(a.as_number())); }},
+        {"cosh", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::cosh(a.as_number())); }},
+        {"tanh", [](auto a, auto, auto, auto) -> TwValue { return TwValue(std::tanh(a.as_number())); }},
+        {"asinh",[](auto a, auto, auto, auto) -> TwValue { return TwValue(std::asinh(a.as_number())); }},
+        {"acosh",[](auto a, auto, auto, auto) -> TwValue { return TwValue(std::acosh(a.as_number())); }},
+        {"atanh",[](auto a, auto, auto, auto) -> TwValue { return TwValue(std::atanh(a.as_number())); }},
+        {"deg",  [](auto a, auto, auto, auto) -> TwValue { return TwValue(a.as_number() * (180.0 / M_PI)); }},
+        {"rad",  [](auto a, auto, auto, auto) -> TwValue { return TwValue(a.as_number() * (M_PI / 180.0)); }},
+
+        // ---- Constants ----------------------------------------------------
+        {"E",   [](auto, auto, auto, auto) -> TwValue { return TwValue(M_E); }},
+        {"Pi",  [](auto, auto, auto, auto) -> TwValue { return TwValue(M_PI); }},
+        {"Inf", [](auto, auto, auto, auto) -> TwValue { return TwValue(std::numeric_limits<double>::infinity()); }},
+        {"NaN", [](auto, auto, auto, auto) -> TwValue { return TwValue(std::numeric_limits<double>::quiet_NaN()); }},
+
+        // ---- Integer bitwise / shift --------------------------------------
+        // math/asr — arithmetic shift right (sign-extending, 5-bit shift count)
+        {"asr",    [](auto a, auto b, auto, auto) -> TwValue {
+            return TwValue((int64_t)((int32_t)a.as_int() >> (b.as_int() & 31))); }},
+        // math/lsl — logical shift left (truncated to 32 bits)
+        {"lsl",    [](auto a, auto b, auto, auto) -> TwValue {
+            return TwValue((int64_t)(int32_t)((uint32_t)a.as_int() << (b.as_int() & 31))); }},
+        // math/clz — count leading zeros (32-bit; 0→32)
+        {"clz",    [](auto a, auto, auto, auto) -> TwValue {
+            uint32_t v = (uint32_t)a.as_int();
+            return TwValue((int64_t)(v ? std::countl_zero(v) : 32)); }},
+        // math/ctz — count trailing zeros (32-bit; 0→32)
+        {"ctz",    [](auto a, auto, auto, auto) -> TwValue {
+            uint32_t v = (uint32_t)a.as_int();
+            return TwValue((int64_t)(v ? std::countr_zero(v) : 32)); }},
+        // math/popcnt — count set bits (32-bit)
+        {"popcnt", [](auto a, auto, auto, auto) -> TwValue {
+            return TwValue((int64_t)std::popcount((uint32_t)a.as_int())); }},
+
+        // ---- Type conversions (type/*) ------------------------------------
+        {"boolToInt",   [](auto a, auto, auto, auto) -> TwValue { return TwValue((int64_t)(a.as_bool() ? 1 : 0)); }},
+        {"boolToFloat", [](auto a, auto, auto, auto) -> TwValue { return TwValue(a.as_bool() ? 1.0 : 0.0); }},
+        {"intToBool",   [](auto a, auto, auto, auto) -> TwValue { return TwValue(a.as_int() != 0); }},
+        {"intToFloat",  [](auto a, auto, auto, auto) -> TwValue { return TwValue(a.as_number()); }},
+        {"floatToInt",  [](auto a, auto, auto, auto) -> TwValue { return TwValue((int64_t)a.as_number()); }},
+        {"floatToBool", [](auto a, auto, auto, auto) -> TwValue { return TwValue(a.as_number() != 0.0); }},
+
+        // ---- Vector swizzle: combine / extract ----------------------------
+        // math/combine2/3/4 — pack scalars into an array
+        {"combine2", [](auto a, auto b, auto, auto) -> TwValue {
+            return TwValue(TwValue::Array{a, b}); }},
+        {"combine3", [](auto a, auto b, auto c, auto) -> TwValue {
+            return TwValue(TwValue::Array{a, b, c}); }},
+        {"combine4", [](auto a, auto b, auto c, auto d) -> TwValue {
+            return TwValue(TwValue::Array{a, b, c, d}); }},
+        // math/extract2/3/4 — index into an array (0-based)
+        {"extract2", [](auto a, auto b, auto, auto) -> TwValue {
+            if (!a.is_array()) return TwValue{};
+            size_t i = (size_t)b.as_int();
+            return i < a.as_array().size() ? a.as_array()[i] : TwValue{}; }},
+        {"extract3", [](auto a, auto b, auto, auto) -> TwValue {
+            if (!a.is_array()) return TwValue{};
+            size_t i = (size_t)b.as_int();
+            return i < a.as_array().size() ? a.as_array()[i] : TwValue{}; }},
+        {"extract4", [](auto a, auto b, auto, auto) -> TwValue {
+            if (!a.is_array()) return TwValue{};
+            size_t i = (size_t)b.as_int();
+            return i < a.as_array().size() ? a.as_array()[i] : TwValue{}; }},
+
+        // ---- Vector math --------------------------------------------------
+        // math/length — Euclidean length (hypot-style: inf beats NaN)
+        {"length", [](auto a, auto, auto, auto) -> TwValue {
+            if (!a.is_array()) return TwValue(std::abs(a.as_number()));
+            double sum = 0.0;
+            for (const auto &comp : a.as_array()) sum += comp.as_number() * comp.as_number();
+            return TwValue(std::sqrt(sum)); }},
+        // math/dot — dot product
+        {"dot", [](auto a, auto b, auto, auto) -> TwValue {
+            if (!a.is_array() || !b.is_array()) return TwValue(a.as_number() * b.as_number());
+            double sum = 0.0;
+            size_t n = std::min(a.as_array().size(), b.as_array().size());
+            for (size_t i = 0; i < n; ++i) sum += a.as_array()[i].as_number() * b.as_array()[i].as_number();
+            return TwValue(sum); }},
+        // math/normalize — unit vector
+        {"normalize", [](auto a, auto, auto, auto) -> TwValue {
+            if (!a.is_array()) return TwValue(1.0);
+            double len = 0.0;
+            for (const auto &c : a.as_array()) len += c.as_number() * c.as_number();
+            len = std::sqrt(len);
+            if (len == 0.0 || std::isnan(len) || std::isinf(len)) {
+                TwValue::Array zeros(a.as_array().size(), TwValue(0.0));
+                return TwValue(std::move(zeros));
+            }
+            TwValue::Array out; out.reserve(a.as_array().size());
+            for (const auto &c : a.as_array()) out.push_back(TwValue(c.as_number() / len));
+            return TwValue(std::move(out)); }},
+        // math/cross — cross product (float3 only)
+        {"cross", [](auto a, auto b, auto, auto) -> TwValue {
+            if (!a.is_array() || a.as_array().size() < 3 ||
+                !b.is_array() || b.as_array().size() < 3) return TwValue{};
+            double ax = a.as_array()[0].as_number(), ay = a.as_array()[1].as_number(), az = a.as_array()[2].as_number();
+            double bx = b.as_array()[0].as_number(), by = b.as_array()[1].as_number(), bz = b.as_array()[2].as_number();
+            return TwValue(TwValue::Array{TwValue(ay*bz-az*by), TwValue(az*bx-ax*bz), TwValue(ax*by-ay*bx)}); }},
+
+        // ---- Quaternion ---------------------------------------------------
+        // math/quatMul — Hamilton product
+        {"quatMul", [](auto a, auto b, auto, auto) -> TwValue {
+            if (!a.is_array() || a.as_array().size() < 4 ||
+                !b.is_array() || b.as_array().size() < 4) return TwValue{};
+            double ax=a.as_array()[0].as_number(), ay=a.as_array()[1].as_number(),
+                   az=a.as_array()[2].as_number(), aw=a.as_array()[3].as_number();
+            double bx=b.as_array()[0].as_number(), by=b.as_array()[1].as_number(),
+                   bz=b.as_array()[2].as_number(), bw=b.as_array()[3].as_number();
+            return TwValue(TwValue::Array{
+                TwValue(aw*bx + ax*bw + ay*bz - az*by),
+                TwValue(aw*by + ay*bw + az*bx - ax*bz),
+                TwValue(aw*bz + az*bw + ax*by - ay*bx),
+                TwValue(aw*bw - ax*bx - ay*by - az*bz)}); }},
+        // math/quatConjugate — negate xyz, keep w
+        {"quatConjugate", [](auto a, auto, auto, auto) -> TwValue {
+            if (!a.is_array() || a.as_array().size() < 4) return TwValue{};
+            return TwValue(TwValue::Array{
+                TwValue(-a.as_array()[0].as_number()), TwValue(-a.as_array()[1].as_number()),
+                TwValue(-a.as_array()[2].as_number()), a.as_array()[3]}); }},
+        // math/quatAngleBetween — 2*acos(dot(a,b)) for unit quaternions
+        {"quatAngleBetween", [](auto a, auto b, auto, auto) -> TwValue {
+            if (!a.is_array() || a.as_array().size() < 4 ||
+                !b.is_array() || b.as_array().size() < 4) return TwValue{};
+            double d = 0.0;
+            for (size_t i = 0; i < 4; ++i) d += a.as_array()[i].as_number() * b.as_array()[i].as_number();
+            return TwValue(2.0 * std::acos(std::clamp(d, -1.0, 1.0))); }},
+        // math/quatFromAxisAngle — axis (float3) + angle (float) → float4
+        {"quatFromAxisAngle", [](auto axis, auto angle, auto, auto) -> TwValue {
+            if (!axis.is_array() || axis.as_array().size() < 3) return TwValue{};
+            double s = std::sin(0.5 * angle.as_number()), w = std::cos(0.5 * angle.as_number());
+            return TwValue(TwValue::Array{
+                TwValue(axis.as_array()[0].as_number()*s), TwValue(axis.as_array()[1].as_number()*s),
+                TwValue(axis.as_array()[2].as_number()*s), TwValue(w)}); }},
+        // math/quatSlerp — slerp(a, b, c)
+        {"quatSlerp", [](auto a, auto b, auto c, auto) -> TwValue {
+            if (!a.is_array() || a.as_array().size() < 4 ||
+                !b.is_array() || b.as_array().size() < 4) return TwValue{};
+            double t = c.as_number();
+            double ax=a.as_array()[0].as_number(), ay=a.as_array()[1].as_number(),
+                   az=a.as_array()[2].as_number(), aw=a.as_array()[3].as_number();
+            double bx=b.as_array()[0].as_number(), by=b.as_array()[1].as_number(),
+                   bz=b.as_array()[2].as_number(), bw=b.as_array()[3].as_number();
+            double d = ax*bx + ay*by + az*bz + aw*bw;
+            if (d < 0.0) { d=-d; bx=-bx; by=-by; bz=-bz; bw=-bw; }
+            double ka, kb;
+            if (d > 0.9995) { ka=1.0-t; kb=t; }
+            else { double om=std::acos(d), so=std::sin(om); ka=std::sin((1.0-t)*om)/so; kb=std::sin(t*om)/so; }
+            return TwValue(TwValue::Array{TwValue(ax*ka+bx*kb), TwValue(ay*ka+by*kb),
+                                          TwValue(az*ka+bz*kb), TwValue(aw*ka+bw*kb)}); }},
+    };
+    return tbl;
+}
+
+inline TwValue eval_node(const TwValue::Dict &expr, const Params &params,
         const TwState &state, const TwValue::Dict &enums) {
 
-    auto op_it = expr.find("op");
-    if (op_it == expr.end() || !op_it->second.is_string()) return TwValue{};
-    const std::string &op = op_it->second.as_string();
+    const std::string type = node_type(expr);
+    if (type.empty()) return TwValue{};
 
     auto get = [&](const char *k) -> TwValue {
         auto it = expr.find(k);
         return it != expr.end() ? eval_expr(it->second, params, state, enums) : TwValue{};
     };
 
-    if (op == "get") {
+    // ---- Structural nodes (need expr dict access) -------------------------
+
+    // pointer/get: {"type":"pointer/get","pointer":"/var/key"}
+    if (type == "get") {
         auto pit = expr.find("pointer");
         if (pit == expr.end()) return TwValue{};
         auto [var, key] = parse_pointer(pit->second.as_string(), params);
         return var.empty() ? TwValue{} : state.get_nested(var, key);
     }
 
-    TwValue a = get("a"), b = get("b");
-
-    auto num2 = [&](auto fn) -> TwValue {
-        if (a.is_int() && b.is_int())
-            return TwValue((int64_t)fn(a.as_int(), b.as_int()));
-        return TwValue(fn(a.as_number(), b.as_number()));
-    };
-
-    if (op == "add")  return num2([](auto x, auto y){ return x + y; });
-    if (op == "sub")  return num2([](auto x, auto y){ return x - y; });
-    if (op == "mul")  return num2([](auto x, auto y){ return x * y; });
-    if (op == "div") {
-        if (a.is_int() && b.is_int()) {
-            int64_t bi = b.as_int(); return bi ? TwValue(a.as_int() / bi) : TwValue{};
-        }
-        double bd = b.as_number(); return bd != 0.0 ? TwValue(a.as_number() / bd) : TwValue{};
-    }
-    if (op == "iadd") return TwValue(a.as_int() + b.as_int());
-    if (op == "isub") return TwValue(a.as_int() - b.as_int());
-    if (op == "imul") return TwValue(a.as_int() * b.as_int());
-    if (op == "idiv") { int64_t bi = b.as_int(); return bi ? TwValue(a.as_int()/bi) : TwValue{}; }
-    if (op == "neg")  return a.is_int() ? TwValue(-a.as_int()) : TwValue(-a.as_number());
-    if (op == "abs")  return a.is_int() ? TwValue(std::abs(a.as_int())) : TwValue(std::abs(a.as_number()));
-    if (op == "min")  return a < b ? a : b;
-    if (op == "max")  return a > b ? a : b;
-
-    // Boolean logic (KHR_interactivity math/and, math/or, math/not)
-    if (op == "and") return TwValue(a.as_bool() && b.as_bool());
-    if (op == "or")  return TwValue(a.as_bool() || b.as_bool());
-    if (op == "not") return TwValue(!a.as_bool());
-
-    // Comparison ops returning bool (usable inside boolean expressions)
-    if (op == "eq")  return TwValue(a == b);
-    if (op == "neq") return TwValue(a != b);
-    if (op == "lt")  return TwValue(a <  b);
-    if (op == "le")  return TwValue(a <= b);
-    if (op == "gt")  return TwValue(a >  b);
-    if (op == "ge")  return TwValue(a >= b);
-
-    // Conditional (KHR_interactivity math/select): {"op":"select","condition":expr,"a":if_true,"b":if_false}
-    if (op == "select") {
+    // math/select: {"type":"math/select","condition":expr,"a":if_true,"b":if_false}
+    if (type == "select") {
         auto cit = expr.find("condition");
         TwValue cond = cit != expr.end()
             ? eval_expr(cit->second, params, state, enums) : TwValue{};
-        return cond.as_bool() ? a : b;
+        return cond.as_bool() ? get("a") : get("b");
     }
 
-    // Unary math (KHR_interactivity math/ceil, floor, round, sqrt, log, exp, sign)
-    if (op == "ceil")  return TwValue(std::ceil(a.as_number()));
-    if (op == "floor") return TwValue(std::floor(a.as_number()));
-    if (op == "round") return TwValue(std::round(a.as_number()));
-    if (op == "sqrt")  return TwValue(std::sqrt(a.as_number()));
-    if (op == "log")   return TwValue(std::log(a.as_number()));
-    if (op == "exp")   return TwValue(std::exp(a.as_number()));
-    if (op == "sign") {
-        double v = a.as_number();
-        return TwValue(v > 0.0 ? 1.0 : v < 0.0 ? -1.0 : 0.0);
-    }
-    if (op == "trunc") return a.is_int() ? a : TwValue(std::trunc(a.as_number()));
-
-    // Binary math (KHR_interactivity math/pow, math/mod)
-    if (op == "pow") return TwValue(std::pow(a.as_number(), b.as_number()));
-    if (op == "mod") {
-        if (a.is_int() && b.is_int()) {
-            int64_t bi = b.as_int(); return bi ? TwValue(a.as_int() % bi) : TwValue{};
-        }
-        return TwValue(std::fmod(a.as_number(), b.as_number()));
-    }
-    if (op == "log2")  return TwValue(std::log2(b.as_number()));  // spec: log base-a of b
-    if (op == "atan2") return TwValue(std::atan2(a.as_number(), b.as_number()));
-
-    // Trig (KHR_interactivity math/sin etc.)
-    if (op == "sin")   return TwValue(std::sin(a.as_number()));
-    if (op == "cos")   return TwValue(std::cos(a.as_number()));
-    if (op == "tan")   return TwValue(std::tan(a.as_number()));
-    if (op == "asin")  return TwValue(std::asin(a.as_number()));
-    if (op == "acos")  return TwValue(std::acos(a.as_number()));
-    if (op == "atan")  return TwValue(std::atan(a.as_number()));
-    if (op == "sinh")  return TwValue(std::sinh(a.as_number()));
-    if (op == "cosh")  return TwValue(std::cosh(a.as_number()));
-    if (op == "tanh")  return TwValue(std::tanh(a.as_number()));
-    if (op == "asinh") return TwValue(std::asinh(a.as_number()));
-    if (op == "acosh") return TwValue(std::acosh(a.as_number()));
-    if (op == "atanh") return TwValue(std::atanh(a.as_number()));
-    if (op == "deg")   return TwValue(a.as_number() * (180.0 / M_PI));
-    if (op == "rad")   return TwValue(a.as_number() * (M_PI / 180.0));
-
-    // Clamp (KHR_interactivity math/clamp): {"op":"clamp","a":val,"min":lo,"max":hi}
-    if (op == "clamp") {
-        auto min_it = expr.find("min"), max_it = expr.find("max");
-        TwValue mn = min_it != expr.end()
-            ? eval_expr(min_it->second, params, state, enums) : TwValue{};
-        TwValue mx = max_it != expr.end()
-            ? eval_expr(max_it->second, params, state, enums) : TwValue{};
-        if (a < mn) return mn;
-        if (a > mx) return mx;
-        return a;
+    // math/switch: {"type":"math/switch","selection":expr,"cases":[...],"default":expr,"<n>":expr}
+    if (type == "switch") {
+        auto sel_it = expr.find("selection");
+        int64_t sel = sel_it != expr.end()
+            ? eval_expr(sel_it->second, params, state, enums).as_int() : 0;
+        std::string sel_str = std::to_string(sel);
+        auto case_it = expr.find(sel_str);
+        if (case_it != expr.end())
+            return eval_expr(case_it->second, params, state, enums);
+        auto def_it = expr.find("default");
+        return def_it != expr.end()
+            ? eval_expr(def_it->second, params, state, enums) : TwValue{};
     }
 
-    // Saturate (KHR_interactivity math/saturate): clamp to [0,1]
-    if (op == "saturate") {
-        double v = a.as_number();
-        return TwValue(v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v);
+    // math/clamp: {"type":"math/clamp","a":val,"b":lo,"c":hi}
+    if (type == "clamp") {
+        TwValue a = get("a"), lo = get("b"), hi = get("c");
+        if (a < lo) return lo; if (a > hi) return hi; return a;
     }
 
-    // Mix/lerp (KHR_interactivity math/mix): {"op":"mix","a":x,"b":y,"t":factor}
-    if (op == "mix") {
-        auto t_it = expr.find("t");
-        double t = t_it != expr.end()
-            ? eval_expr(t_it->second, params, state, enums).as_number() : 0.0;
-        return TwValue(a.as_number() * (1.0 - t) + b.as_number() * t);
+    // math/mix (lerp): {"type":"math/mix","a":x,"b":y,"c":t}  (spec uses a,b,c)
+    if (type == "mix") {
+        TwValue a = get("a"), b = get("b");
+        auto c_it = expr.find("c");
+        auto t_it = expr.find("t");  // legacy alias
+        double t = c_it != expr.end() ? eval_expr(c_it->second, params, state, enums).as_number()
+                 : t_it != expr.end() ? eval_expr(t_it->second, params, state, enums).as_number()
+                 : 0.0;
+        return TwValue((1.0 - t) * a.as_number() + t * b.as_number());
     }
 
-    // Constants (KHR_interactivity math/E, math/Pi, math/Inf, math/NaN)
-    if (op == "E")   return TwValue(M_E);
-    if (op == "Pi")  return TwValue(M_PI);
-    if (op == "Inf") return TwValue(std::numeric_limits<double>::infinity());
-    if (op == "NaN") return TwValue(std::numeric_limits<double>::quiet_NaN());
+    // math/random — seeded per-activation (simplification: use thread_local RNG)
+    if (type == "random") {
+        thread_local std::mt19937_64 rng(std::random_device{}());
+        thread_local std::uniform_real_distribution<double> dist(0.0, 1.0);
+        return TwValue(dist(rng));
+    }
 
-    // Type conversions (KHR_interactivity type/*)
-    if (op == "boolToInt")   return TwValue((int64_t)(a.as_bool() ? 1 : 0));
-    if (op == "boolToFloat") return TwValue(a.as_bool() ? 1.0 : 0.0);
-    if (op == "intToBool")   return TwValue(a.as_int() != 0);
-    if (op == "intToFloat")  return TwValue(a.as_number());
-    if (op == "floatToInt")  return TwValue((int64_t)a.as_number());
-    if (op == "floatToBool") return TwValue(a.as_number() != 0.0);
-
+    // ---- Registry dispatch for pure (a,b,c,d) nodes ----------------------
+    TwValue a = get("a"), b = get("b"), c = get("c"), d = get("d");
+    const auto &tbl = kNodeTypes();
+    auto it = tbl.find(type);
+    if (it != tbl.end()) return it->second(a, b, c, d);
     return TwValue{};
 }
 
@@ -314,7 +510,7 @@ inline TwValue eval_expr(const TwValue &expr, const Params &params,
         const TwState &state, const TwValue::Dict &enums) {
     if (expr.is_dict()) {
         const auto &d = expr.as_dict();
-        if (d.count("op")) return eval_op(d, params, state, enums);
+        if (d.count("type")) return eval_node(d, params, state, enums);
     }
     return resolve_param(expr, params);
 }
@@ -369,8 +565,8 @@ inline bool run_checks(const TwValue::Array &checks, const Params &params,
         if (!step.is_dict()) return false;
         const auto &cs = step.as_dict();
 
-        // "eval" step: evaluate a boolean expression directly
-        // {"eval": {"op": "and", "a": ..., "b": ...}}
+        // "eval" step: evaluate a KHR_interactivity node expression
+        // {"eval": {"type": "math/and", "a": ..., "b": ...}}
         auto eval_it = cs.find("eval");
         if (eval_it != cs.end()) {
             TwValue result = eval_expr(eval_it->second, params, state, enums);
