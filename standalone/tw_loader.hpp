@@ -583,9 +583,11 @@ inline bool run_checks(const TwValue::Array &checks, const Params &params,
             auto &raw = var_it->second;
             if (raw.is_string())
                 ptr = parse_pointer(raw.as_string(), params);
-            else if (raw.is_array() && raw.as_array().size() == 2)
-                ptr = {raw.as_array()[0].as_string(),
-                       resolve_param(raw.as_array()[1], params)};
+            else if (raw.is_array() && raw.as_array().size() == 2) {
+                std::string vname = raw.as_array()[0].as_string();
+                if (!vname.empty() && vname[0] == '/') vname = vname.substr(1);
+                ptr = {std::move(vname), resolve_param(raw.as_array()[1], params)};
+            }
             else return false;
         } else return false;
 
@@ -640,10 +642,14 @@ inline TwActionFn build_action(const TwValue::Dict &def, const TwValue::Dict &en
             if (!step.is_dict()) return nullptr;
             const auto &s = step.as_dict();
 
+            auto eval_it  = s.find("eval");
             auto check_it = s.find("check");
             auto set_it   = s.find("set");
 
-            if (check_it != s.end()) {
+            if (eval_it != s.end()) {
+                TwValue result = eval_expr(eval_it->second, params, *new_state, enums);
+                if (!result.is_bool() || !result.as_bool()) return nullptr;
+            } else if (check_it != s.end()) {
                 auto [var, key] = parse_pointer(check_it->second.as_string(), params);
                 if (var.empty()) return nullptr;
                 TwValue actual   = new_state->get_nested(var, key);

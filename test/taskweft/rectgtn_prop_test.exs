@@ -112,12 +112,10 @@ defmodule Taskweft.RECTGTNPropTest do
         "alternatives": [
           {"name": "already",  "check": [{"pointer": "/st/{key}", "eq": "{desired}"}], "subtasks": []},
           {"name": "light_on", "check": [{"pointer": "/st/light", "eq": "off"},
-                                         {"var": ["st", "key"], "eq": "light"},
-                                         {"var": ["st", "desired"], "eq": "on"}],
+                                         {"eval": {"type": "math/eq", "a": "{key}", "b": "light"}}],
            "subtasks": [["a_light_on"]]},
           {"name": "door_open","check": [{"pointer": "/st/door", "eq": "closed"},
-                                         {"var": ["st", "key"], "eq": "door"},
-                                         {"var": ["st", "desired"], "eq": "open"}],
+                                         {"eval": {"type": "math/eq", "a": "{key}", "b": "door"}}],
            "subtasks": [["a_door_open"]]}
         ]
       }
@@ -523,9 +521,9 @@ defmodule Taskweft.RECTGTNPropTest do
           case Taskweft.replan(bw, plan_json, fail_step) do
             {:ok, json} ->
               result = Jason.decode!(json)
-              # Recovered plan may be empty (if fail was last step) but the
-              # "recovered" key must be present and be a list.
-              is_list(result["recovered"])
+              # "recovered" key must be present and be a boolean; "new_plan"
+              # holds the continuation steps (list or null).
+              is_boolean(result["recovered"])
 
             {:error, _} ->
               true
