@@ -3,6 +3,7 @@
 #pragma once
 #include "tw_domain.hpp"
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -204,6 +205,108 @@ inline TwValue eval_op(const TwValue::Dict &expr, const Params &params,
     if (op == "abs")  return a.is_int() ? TwValue(std::abs(a.as_int())) : TwValue(std::abs(a.as_number()));
     if (op == "min")  return a < b ? a : b;
     if (op == "max")  return a > b ? a : b;
+
+    // Boolean logic (KHR_interactivity math/and, math/or, math/not)
+    if (op == "and") return TwValue(a.as_bool() && b.as_bool());
+    if (op == "or")  return TwValue(a.as_bool() || b.as_bool());
+    if (op == "not") return TwValue(!a.as_bool());
+
+    // Comparison ops returning bool (usable inside boolean expressions)
+    if (op == "eq")  return TwValue(a == b);
+    if (op == "neq") return TwValue(a != b);
+    if (op == "lt")  return TwValue(a <  b);
+    if (op == "le")  return TwValue(a <= b);
+    if (op == "gt")  return TwValue(a >  b);
+    if (op == "ge")  return TwValue(a >= b);
+
+    // Conditional (KHR_interactivity math/select): {"op":"select","condition":expr,"a":if_true,"b":if_false}
+    if (op == "select") {
+        auto cit = expr.find("condition");
+        TwValue cond = cit != expr.end()
+            ? eval_expr(cit->second, params, state, enums) : TwValue{};
+        return cond.as_bool() ? a : b;
+    }
+
+    // Unary math (KHR_interactivity math/ceil, floor, round, sqrt, log, exp, sign)
+    if (op == "ceil")  return TwValue(std::ceil(a.as_number()));
+    if (op == "floor") return TwValue(std::floor(a.as_number()));
+    if (op == "round") return TwValue(std::round(a.as_number()));
+    if (op == "sqrt")  return TwValue(std::sqrt(a.as_number()));
+    if (op == "log")   return TwValue(std::log(a.as_number()));
+    if (op == "exp")   return TwValue(std::exp(a.as_number()));
+    if (op == "sign") {
+        double v = a.as_number();
+        return TwValue(v > 0.0 ? 1.0 : v < 0.0 ? -1.0 : 0.0);
+    }
+    if (op == "trunc") return a.is_int() ? a : TwValue(std::trunc(a.as_number()));
+
+    // Binary math (KHR_interactivity math/pow, math/mod)
+    if (op == "pow") return TwValue(std::pow(a.as_number(), b.as_number()));
+    if (op == "mod") {
+        if (a.is_int() && b.is_int()) {
+            int64_t bi = b.as_int(); return bi ? TwValue(a.as_int() % bi) : TwValue{};
+        }
+        return TwValue(std::fmod(a.as_number(), b.as_number()));
+    }
+    if (op == "log2")  return TwValue(std::log2(b.as_number()));  // spec: log base-a of b
+    if (op == "atan2") return TwValue(std::atan2(a.as_number(), b.as_number()));
+
+    // Trig (KHR_interactivity math/sin etc.)
+    if (op == "sin")   return TwValue(std::sin(a.as_number()));
+    if (op == "cos")   return TwValue(std::cos(a.as_number()));
+    if (op == "tan")   return TwValue(std::tan(a.as_number()));
+    if (op == "asin")  return TwValue(std::asin(a.as_number()));
+    if (op == "acos")  return TwValue(std::acos(a.as_number()));
+    if (op == "atan")  return TwValue(std::atan(a.as_number()));
+    if (op == "sinh")  return TwValue(std::sinh(a.as_number()));
+    if (op == "cosh")  return TwValue(std::cosh(a.as_number()));
+    if (op == "tanh")  return TwValue(std::tanh(a.as_number()));
+    if (op == "asinh") return TwValue(std::asinh(a.as_number()));
+    if (op == "acosh") return TwValue(std::acosh(a.as_number()));
+    if (op == "atanh") return TwValue(std::atanh(a.as_number()));
+    if (op == "deg")   return TwValue(a.as_number() * (180.0 / M_PI));
+    if (op == "rad")   return TwValue(a.as_number() * (M_PI / 180.0));
+
+    // Clamp (KHR_interactivity math/clamp): {"op":"clamp","a":val,"min":lo,"max":hi}
+    if (op == "clamp") {
+        auto min_it = expr.find("min"), max_it = expr.find("max");
+        TwValue mn = min_it != expr.end()
+            ? eval_expr(min_it->second, params, state, enums) : TwValue{};
+        TwValue mx = max_it != expr.end()
+            ? eval_expr(max_it->second, params, state, enums) : TwValue{};
+        if (a < mn) return mn;
+        if (a > mx) return mx;
+        return a;
+    }
+
+    // Saturate (KHR_interactivity math/saturate): clamp to [0,1]
+    if (op == "saturate") {
+        double v = a.as_number();
+        return TwValue(v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v);
+    }
+
+    // Mix/lerp (KHR_interactivity math/mix): {"op":"mix","a":x,"b":y,"t":factor}
+    if (op == "mix") {
+        auto t_it = expr.find("t");
+        double t = t_it != expr.end()
+            ? eval_expr(t_it->second, params, state, enums).as_number() : 0.0;
+        return TwValue(a.as_number() * (1.0 - t) + b.as_number() * t);
+    }
+
+    // Constants (KHR_interactivity math/E, math/Pi, math/Inf, math/NaN)
+    if (op == "E")   return TwValue(M_E);
+    if (op == "Pi")  return TwValue(M_PI);
+    if (op == "Inf") return TwValue(std::numeric_limits<double>::infinity());
+    if (op == "NaN") return TwValue(std::numeric_limits<double>::quiet_NaN());
+
+    // Type conversions (KHR_interactivity type/*)
+    if (op == "boolToInt")   return TwValue((int64_t)(a.as_bool() ? 1 : 0));
+    if (op == "boolToFloat") return TwValue(a.as_bool() ? 1.0 : 0.0);
+    if (op == "intToBool")   return TwValue(a.as_int() != 0);
+    if (op == "intToFloat")  return TwValue(a.as_number());
+    if (op == "floatToInt")  return TwValue((int64_t)a.as_number());
+    if (op == "floatToBool") return TwValue(a.as_number() != 0.0);
+
     return TwValue{};
 }
 
@@ -265,6 +368,15 @@ inline bool run_checks(const TwValue::Array &checks, const Params &params,
     for (auto &step : checks) {
         if (!step.is_dict()) return false;
         const auto &cs = step.as_dict();
+
+        // "eval" step: evaluate a boolean expression directly
+        // {"eval": {"op": "and", "a": ..., "b": ...}}
+        auto eval_it = cs.find("eval");
+        if (eval_it != cs.end()) {
+            TwValue result = eval_expr(eval_it->second, params, state, enums);
+            if (!result.is_bool() || !result.as_bool()) return false;
+            continue;
+        }
 
         std::pair<std::string, TwValue> ptr;
         auto ptr_it = cs.find("pointer");
