@@ -30,7 +30,9 @@ properties across Storage, Query, transactions, joins, and aggregates.
   GenServer, and they must return a typed fallback (`nil`, `[]`, `:ok`)
   that callers can distinguish.
 - **Commit every green.** One commit per cycle (or tightly-paired
-  cycle).  The TDD arc should be legible in `git log`.
+  cycle).  The TDD arc should be legible in `git log`.  Messages use
+  sentence case; do not use Conventional Commits prefixes (`feat:`,
+  `fix:`, `chore:`, etc.).
 - **PropCheck, not mocks.** Generators produce the inputs; properties
   express the invariant.  If a property needs a generator that is hard
   to write, that is a signal the API surface is too wide, not that a
