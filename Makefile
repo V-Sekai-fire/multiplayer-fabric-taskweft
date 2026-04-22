@@ -2,7 +2,7 @@ PRIV_DIR = priv
 NIF_SO   = $(PRIV_DIR)/libtaskweft_nif.so
 
 CXXFLAGS = -std=c++20 -O2 -fPIC -fvisibility=hidden
-CPPFLAGS = -I$(ERTS_INCLUDE_DIR) -I$(FINE_INCLUDE_DIR) -Istandalone
+CPPFLAGS = -I$(ERTS_INCLUDE_DIR) -Istandalone
 
 ifeq ($(shell uname -s),Darwin)
   LDFLAGS = -undefined dynamic_lookup
