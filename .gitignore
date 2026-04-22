@@ -22,3 +22,8 @@ erl_crash.dump
 # Python cache
 __pycache__/
 *.pyc
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
