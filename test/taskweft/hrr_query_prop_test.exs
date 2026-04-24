@@ -88,9 +88,8 @@ defmodule Taskweft.HRR.QueryPropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    url = System.get_env("TEST_DATABASE_URL", "postgresql://root@localhost:26257/taskweft_test?sslmode=disable")
     pool_name = :"hrr_query_test_#{:erlang.unique_integer([:positive])}"
-    {:ok, _} = Postgrex.start_link(name: pool_name, url: url)
+    {:ok, _} = Postgrex.start_link([name: pool_name] ++ crdb_conn_opts())
     Storage.ensure_schema!(pool_name)
     Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
     Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
@@ -101,6 +100,22 @@ defmodule Taskweft.HRR.QueryPropTest do
       Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
       Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
       GenServer.stop(pool_name)
+    end
+  end
+
+  defp crdb_conn_opts do
+    url = System.get_env("TEST_DATABASE_URL", "postgresql://root@localhost:26257/taskweft_test?sslmode=verify-full")
+    base = [url: url]
+    case System.get_env("CRDB_CA_CERT") do
+      nil -> base
+      ca  ->
+        base ++ [ssl: true, ssl_opts: [
+          cacertfile: ca,
+          certfile: System.get_env("CRDB_CLIENT_CERT"),
+          keyfile:   System.get_env("CRDB_CLIENT_KEY"),
+          verify: :verify_peer,
+          server_name_indication: ~c"crdb"
+        ]]
     end
   end
 

@@ -71,15 +71,33 @@ defmodule Taskweft.HRR.Adapter do
     pool_size = Keyword.get(config, :pool_size, 10)
     pool_name = Keyword.get(config, :name, Taskweft.HRR.Pool)
 
-    child_spec = Postgrex.child_spec(
-      name: pool_name,
-      url: url,
-      pool_size: pool_size,
-      after_connect: {Storage, :ensure_schema_on_connect!, []}
-    )
+    pool_opts =
+      [name: pool_name, url: url, pool_size: pool_size,
+       after_connect: {Storage, :ensure_schema_on_connect!, []}]
+      |> Keyword.merge(crdb_ssl_opts(config))
 
     meta = %{adapter: __MODULE__, store: {pool_name, dim}}
-    {:ok, child_spec, meta}
+    {:ok, Postgrex.child_spec(pool_opts), meta}
+  end
+
+  defp crdb_ssl_opts(config) do
+    ca =
+      Keyword.get(config, :ssl_ca_cert, System.get_env("CRDB_CA_CERT"))
+
+    case ca do
+      nil ->
+        []
+
+      ca ->
+        [ssl: true,
+         ssl_opts: [
+           cacertfile: ca,
+           certfile: Keyword.get(config, :ssl_client_cert, System.get_env("CRDB_CLIENT_CERT")),
+           keyfile:   Keyword.get(config, :ssl_client_key,  System.get_env("CRDB_CLIENT_KEY")),
+           verify: :verify_peer,
+           server_name_indication: ~c"crdb"
+         ]]
+    end
   end
 
   def checkout(_meta, _config, fun), do: fun.()
