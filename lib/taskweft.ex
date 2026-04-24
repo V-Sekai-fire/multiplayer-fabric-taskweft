@@ -7,9 +7,7 @@ defmodule Taskweft do
   """
 
   alias Taskweft.NIF
-  alias Taskweft.Bridge
   alias Taskweft.ReBAC
-  alias Taskweft.Retriever
 
   @doc """
   Run the HTN planner on a self-contained JSON-LD domain document.
@@ -164,24 +162,27 @@ defmodule Taskweft do
 
   @doc """
   Hybrid retrieval scoring of candidate facts.
-
-  See `Taskweft.Retriever.score/4` for parameter details.
   """
   def retriever_score(candidates_json, query_text, query_hrr_bytes, opts \\ []) do
-    Retriever.score(candidates_json, query_text, query_hrr_bytes, opts)
+    NIF.retriever_score(candidates_json, query_text, query_hrr_bytes,
+      Keyword.get(opts, :fts_w, 0.3),
+      Keyword.get(opts, :jaccard_w, 0.3),
+      Keyword.get(opts, :hrr_w, 0.4),
+      Keyword.get(opts, :half_life_days, 30.0),
+      Keyword.get(opts, :dim, 256))
   end
 
   @doc """
   Extract entity names from a PDDL-style state JSON dict.
   """
   def bridge_extract_entities(state_json) do
-    Bridge.extract_entities(state_json)
+    NIF.bridge_extract_entities(state_json)
   end
 
   @doc """
   Convert a plan result to storable memory fact content (JSON array).
   """
   def bridge_plan_contents(plan_json, domain, entities_json) do
-    Bridge.plan_contents(plan_json, domain, entities_json)
+    NIF.bridge_plan_contents(plan_json, domain, entities_json)
   end
 end
