@@ -13,7 +13,7 @@ defmodule Taskweft.ReBAC do
       {"type":"tuple_to_userset","pivot_rel":"IS_MEMBER_OF","inner":{...}}
 
   Valid relation names: HAS_CAPABILITY, CONTROLS, OWNS, IS_MEMBER_OF,
-  DELEGATED_TO, SUPERVISOR_OF, PARTNER_OF.
+  DELEGATED_TO, SUPERVISOR_OF, PARTNER_OF, CAN_ENTER, CAN_INSTANCE.
   """
 
   alias Taskweft.NIF
