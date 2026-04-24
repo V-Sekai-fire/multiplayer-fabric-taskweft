@@ -22,7 +22,8 @@ defmodule Taskweft.MixProject do
   defp deps do
     [
       {:elixir_make, "~> 0.9"},
-      {:exqlite, "~> 0.23"},
+      {:ecto_sql, "~> 3.12"},
+      {:postgrex, "~> 0.19"},
       {:jason, "~> 1.4"},
       {:propcheck, "~> 1.4", only: [:test, :dev], runtime: false}
     ]

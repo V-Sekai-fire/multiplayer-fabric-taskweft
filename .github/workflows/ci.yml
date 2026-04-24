@@ -18,6 +18,7 @@ jobs:
 
     env:
       MIX_ENV: test
+      TEST_DATABASE_URL: "postgresql://root@localhost:26257/taskweft_test?sslmode=disable"
 
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +37,20 @@ jobs:
             _build
           key: ${{ runner.os }}-taskweft-mix-${{ hashFiles('mix.lock') }}
           restore-keys: ${{ runner.os }}-taskweft-mix-
+
+      - name: Install CockroachDB
+        run: |
+          curl -fsSL https://binaries.cockroachdb.com/cockroach-v23.2.3.linux-amd64.tgz | tar xz
+          sudo cp cockroach-v23.2.3.linux-amd64/cockroach /usr/local/bin/
+
+      - name: Start CockroachDB
+        run: |
+          cockroach start-single-node --insecure --background \
+            --listen-addr=localhost:26257 --http-addr=localhost:8080
+          until cockroach sql --insecure --execute="SELECT 1" 2>/dev/null; do sleep 1; done
+
+      - name: Create test database
+        run: cockroach sql --insecure --execute="CREATE DATABASE IF NOT EXISTS taskweft_test;"
 
       - name: Install dependencies
         run: mix deps.get

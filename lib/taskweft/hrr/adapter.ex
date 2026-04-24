@@ -1,30 +1,32 @@
 defmodule Taskweft.HRR.Adapter do
   @moduledoc """
-  Ecto adapter backed by Holographic Reduced Representations, persisted to SQLite.
+  Ecto adapter backed by Holographic Reduced Representations, persisted to PostgreSQL
+  (CockroachDB-compatible).
 
   ## What HRR replaces SQL with
 
-  | SQL concept           | HRR operation                                                  |
-  |-----------------------|----------------------------------------------------------------|
-  | Table                 | Per-source bundle (superposition of record vectors in SQLite)  |
-  | INSERT                | `bundle(table_mem, bind(role(field), encode(value)))`          |
-  | DELETE                | Remove record vector, rebuild bundle                           |
-  | WHERE field = value   | exact in-memory equality after full scan                       |
-  | WHERE LIKE %query%    | `probe_field` → cosine-rank by `encode(stripped_pattern)`      |
-  | SELECT *              | Return deserialized JSON rows from SQLite                      |
-  | UPDATE                | DELETE + INSERT                                                |
+  | SQL concept           | HRR operation                                                     |
+  |-----------------------|-------------------------------------------------------------------|
+  | Table                 | Per-source bundle (superposition of record vectors in PostgreSQL) |
+  | INSERT                | `bundle(table_mem, bind(role(field), encode(value)))`             |
+  | DELETE                | Remove record vector, rebuild bundle                              |
+  | WHERE field = value   | exact in-memory equality after full scan                          |
+  | WHERE LIKE %query%    | `probe_field` → cosine-rank by `encode(stripped_pattern)`         |
+  | SELECT *              | Return deserialized JSON rows from PostgreSQL                     |
+  | UPDATE                | DELETE + INSERT                                                   |
 
   ## Repo configuration
 
       config :my_app, MyApp.Repo,
         adapter: Taskweft.HRR.Adapter,
         hrr_dim: 1024,                    # vector dimension (default 1024)
-        name: MyApp.HRRStorage,           # GenServer name
-        db_path: "/var/data/hrr.db"       # SQLite path (default ~/.taskweft/<name>.db)
+        name: MyApp.HRRPool,              # Postgrex pool name
+        url: "postgresql://...",          # database URL (default DATABASE_URL env var)
+        pool_size: 10                     # connection pool size (default 10)
 
   ## Caveats
 
-  * Records are persisted in SQLite as JSON; vectors are stored as BLOB columns.
+  * Records are persisted in PostgreSQL as JSON; vectors are stored as BYTEA columns.
   * `LIKE` / `ILIKE` use HRR cosine similarity (`probe_field`) rather than
     string pattern matching.  Pass `:hrr_threshold` in query opts to tune
     the minimum similarity score (default `0.1`).
@@ -64,16 +66,19 @@ defmodule Taskweft.HRR.Adapter do
   def ensure_all_started(_config, _type), do: {:ok, []}
 
   def init(config) do
-    dim     = Keyword.get(config, :hrr_dim, 1024)
-    name    = Keyword.get(config, :name, Storage)
-    db_path = Keyword.get(config, :db_path)
+    dim       = Keyword.get(config, :hrr_dim, 1024)
+    url       = Keyword.get(config, :url, System.get_env("DATABASE_URL"))
+    pool_size = Keyword.get(config, :pool_size, 10)
+    pool_name = Keyword.get(config, :name, Taskweft.HRR.Pool)
 
-    storage_opts =
-      [name: name, dim: dim]
-      |> then(fn opts -> if db_path, do: Keyword.put(opts, :db_path, db_path), else: opts end)
+    child_spec = Postgrex.child_spec(
+      name: pool_name,
+      url: url,
+      pool_size: pool_size,
+      after_connect: {Storage, :ensure_schema_on_connect!, []}
+    )
 
-    child_spec = Storage.child_spec(storage_opts)
-    meta       = %{adapter: __MODULE__, storage: name, dim: dim}
+    meta = %{adapter: __MODULE__, store: {pool_name, dim}}
     {:ok, child_spec, meta}
   end
 
@@ -96,46 +101,49 @@ defmodule Taskweft.HRR.Adapter do
   def autogenerate(:binary_id), do: generate_uuid()
 
   def insert(meta, schema_meta, fields, _on_conflict, returning, _opts) do
-    %{storage: srv} = meta
+    %{store: store} = meta
     source = schema_meta.source
 
     id         = resolve_id(fields)
     fields_map = fields_to_string_map(fields)
 
-    :ok = Storage.insert(srv, source, id, fields_map)
+    :ok = Storage.insert(store, source, id, fields_map)
 
     returning_vals = Enum.map(returning, fn f -> {f, Keyword.get(fields, f)} end)
     {:ok, returning_vals}
   end
 
   def insert_all(meta, schema_meta, _header, rows, _on_conflict, _returning, _placeholders, _opts) do
-    %{storage: srv} = meta
+    %{store: {pool, _dim} = store} = meta
     source = schema_meta.source
 
-    :ok = Storage.begin_transaction(srv)
-    try do
-      count =
-        Enum.reduce(rows, 0, fn fields, acc ->
-          id         = resolve_id(fields)
-          fields_map = fields_to_string_map(fields)
-          :ok = Storage.insert(srv, source, id, fields_map)
-          acc + 1
-        end)
-      :ok = Storage.commit_transaction(srv)
-      {count, nil}
-    rescue
-      e ->
-        Storage.rollback_transaction(srv)
-        reraise e, __STACKTRACE__
+    result =
+      Postgrex.transaction(pool, fn conn ->
+        Process.put({:taskweft_hrr_conn, pool}, conn)
+        try do
+          Enum.reduce(rows, 0, fn fields, acc ->
+            id         = resolve_id(fields)
+            fields_map = fields_to_string_map(fields)
+            :ok = Storage.insert(store, source, id, fields_map)
+            acc + 1
+          end)
+        after
+          Process.delete({:taskweft_hrr_conn, pool})
+        end
+      end)
+
+    case result do
+      {:ok, count} -> {count, nil}
+      {:error, err} -> raise err
     end
   end
 
   def update(meta, schema_meta, fields, filters, returning, _opts) do
-    %{storage: srv} = meta
+    %{store: {pool, _dim} = store} = meta
     source = schema_meta.source
     id     = Keyword.get(filters, :id) || Keyword.get(filters, :binary_id)
 
-    case Storage.get(srv, source, id) do
+    case Storage.get(store, source, id) do
       nil ->
         {:error, :stale}
 
@@ -143,10 +151,15 @@ defmodule Taskweft.HRR.Adapter do
         updates = fields_to_string_map(fields)
         merged  = Map.merge(existing, updates)
 
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.delete(srv, source, id)
-        :ok = Storage.insert(srv, source, id, merged)
-        :ok = Storage.commit_transaction(srv)
+        Postgrex.transaction(pool, fn conn ->
+          Process.put({:taskweft_hrr_conn, pool}, conn)
+          try do
+            :ok = Storage.delete(store, source, id)
+            :ok = Storage.insert(store, source, id, merged)
+          after
+            Process.delete({:taskweft_hrr_conn, pool})
+          end
+        end)
 
         returning_vals = Enum.map(returning, fn f -> {f, Map.get(merged, to_string(f))} end)
         {:ok, returning_vals}
@@ -154,14 +167,14 @@ defmodule Taskweft.HRR.Adapter do
   end
 
   def delete(meta, schema_meta, filters, _returning, _opts) do
-    %{storage: srv} = meta
+    %{store: store} = meta
     source = schema_meta.source
     id     = Keyword.get(filters, :id) || Keyword.get(filters, :binary_id)
 
-    case Storage.get(srv, source, id) do
+    case Storage.get(store, source, id) do
       nil    -> {:error, :stale}
       _entry ->
-        :ok = Storage.delete(srv, source, id)
+        :ok = Storage.delete(store, source, id)
         {:ok, []}
     end
   end
@@ -173,8 +186,8 @@ defmodule Taskweft.HRR.Adapter do
   def prepare(operation, query), do: {:nocache, {operation, query}}
 
   def execute(meta, _query_meta, {:nocache, {:all, query}}, params, opts) do
-    %{storage: srv} = meta
-    rows = Query.execute(srv, :all, query, params, opts)
+    %{store: store} = meta
+    rows = Query.execute(store, :all, query, params, opts)
     {length(rows), Enum.map(rows, &row_to_list(&1, query))}
   end
 
@@ -183,10 +196,10 @@ defmodule Taskweft.HRR.Adapter do
   end
 
   def stream(meta, _query_meta, {:nocache, {:all, query}}, params, opts) do
-    %{storage: srv} = meta
+    %{store: store} = meta
 
     Stream.resource(
-      fn -> Query.execute(srv, :all, query, params, opts) end,
+      fn -> Query.execute(store, :all, query, params, opts) end,
       fn
         []           -> {:halt, []}
         [row | rest] -> {[row_to_list(row, query)], rest}
@@ -203,27 +216,27 @@ defmodule Taskweft.HRR.Adapter do
   # Ecto.Adapter.Transaction callbacks
   # ---------------------------------------------------------------------------
 
-  def transaction(%{storage: srv}, _opts, fun) do
-    :ok = Storage.begin_transaction(srv)
-
-    try do
-      result = fun.()
-      :ok = Storage.commit_transaction(srv)
-      {:ok, result}
-    rescue
-      exception ->
-        :ok = Storage.rollback_transaction(srv)
-        reraise exception, __STACKTRACE__
-    catch
-      :throw, {:ecto_rollback, value} ->
-        :ok = Storage.rollback_transaction(srv)
-        {:error, value}
+  def transaction(%{store: {pool, _dim} = store}, _opts, fun) do
+    Postgrex.transaction(pool, fn conn ->
+      Process.put({:taskweft_hrr_conn, pool}, conn)
+      try do
+        fun.()
+      catch
+        :throw, {:ecto_rollback, value} -> throw({:ecto_rollback, value})
+      after
+        Process.delete({:taskweft_hrr_conn, pool})
+      end
+    end)
+    |> case do
+      {:ok, result}  -> {:ok, result}
+      {:error, err}  -> {:error, err}
     end
   end
 
-  def in_transaction?(%{storage: srv}), do: Storage.in_transaction?(srv)
+  def in_transaction?(%{store: {pool, _dim}}),
+    do: Process.get({:taskweft_hrr_conn, pool}) != nil
 
-  # rollback/2 signals transaction/3 via throw; transaction/3 calls rollback_transaction.
+  # rollback/2 signals transaction/3 via throw; Postgrex.transaction catches it.
   def rollback(_meta, value), do: throw({:ecto_rollback, value})
 
   # ---------------------------------------------------------------------------

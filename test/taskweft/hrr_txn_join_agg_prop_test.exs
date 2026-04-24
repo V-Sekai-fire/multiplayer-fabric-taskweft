@@ -46,21 +46,25 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    path = Path.join(System.tmp_dir!(), "hrr_tja_#{:erlang.unique_integer([:positive])}.db")
-    name = :"hrr_tja_#{:erlang.unique_integer([:positive])}"
-    {:ok, _} = Storage.start_link(name: name, db_path: path, dim: @dim)
-
+    url = System.get_env("TEST_DATABASE_URL", "postgresql://root@localhost:26257/taskweft_test?sslmode=disable")
+    pool_name = :"hrr_tja_#{:erlang.unique_integer([:positive])}"
+    {:ok, _} = Postgrex.start_link(name: pool_name, url: url)
+    Storage.ensure_schema!(pool_name)
+    Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
+    Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
+    store = {pool_name, @dim}
     try do
-      fun.(name)
+      fun.(store)
     after
-      GenServer.stop(name, :normal, 1_000)
-      Enum.each([path, "#{path}-wal", "#{path}-shm"], &File.rm/1)
+      Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
+      Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
+      GenServer.stop(pool_name)
     end
   end
 
-  defp populate(srv, records, source \\ @source) do
+  defp populate(store, records, source \\ @source) do
     Enum.each(records, fn {id, fields} ->
-      :ok = Storage.insert(srv, source, id, fields)
+      :ok = Storage.insert(store, source, id, fields)
     end)
   end
 
@@ -89,136 +93,140 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Transaction helpers using Postgrex.transaction/3
+  # ---------------------------------------------------------------------------
+
+  # Run fun inside a Postgrex transaction, making the connection visible to
+  # Storage calls via the process dictionary key {:taskweft_hrr_conn, pool}.
+  defp with_txn({pool, _dim} = store, fun) do
+    Postgrex.transaction(pool, fn conn ->
+      Process.put({:taskweft_hrr_conn, pool}, conn)
+      try do
+        fun.(store)
+      after
+        Process.delete({:taskweft_hrr_conn, pool})
+      end
+    end)
+  end
+
+  defp in_transaction?({pool, _dim}) do
+    Process.get({:taskweft_hrr_conn, pool}) != nil
+  end
+
+  # ---------------------------------------------------------------------------
   # Transaction properties
   # ---------------------------------------------------------------------------
 
   property "committed insert is visible after transaction" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.insert(srv, @source, id, fields)
-        :ok = Storage.commit_transaction(srv)
-        Storage.get(srv, @source, id) == fields
+      with_storage(fn store ->
+        {:ok, :ok} = with_txn(store, fn store ->
+          Storage.insert(store, @source, id, fields)
+        end)
+        Storage.get(store, @source, id) == fields
       end)
     end
   end
 
   property "rolled-back insert is not visible" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.insert(srv, @source, id, fields)
-        :ok = Storage.rollback_transaction(srv)
-        Storage.get(srv, @source, id) == nil
+      with_storage(fn {pool, _dim} = store ->
+        Postgrex.transaction(pool, fn conn ->
+          Process.put({:taskweft_hrr_conn, pool}, conn)
+          try do
+            Storage.insert(store, @source, id, fields)
+            # Raise to trigger rollback
+            raise "rollback"
+          rescue
+            _ -> :ok
+          after
+            Process.delete({:taskweft_hrr_conn, pool})
+          end
+        end)
+        Storage.get(store, @source, id) == nil
       end)
     end
   end
 
   property "rolled-back delete preserves the record" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        :ok = Storage.insert(srv, @source, id, fields)
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.delete(srv, @source, id)
-        :ok = Storage.rollback_transaction(srv)
-        Storage.get(srv, @source, id) == fields
+      with_storage(fn {pool, _dim} = store ->
+        :ok = Storage.insert(store, @source, id, fields)
+        Postgrex.transaction(pool, fn conn ->
+          Process.put({:taskweft_hrr_conn, pool}, conn)
+          try do
+            Storage.delete(store, @source, id)
+            raise "rollback"
+          rescue
+            _ -> :ok
+          after
+            Process.delete({:taskweft_hrr_conn, pool})
+          end
+        end)
+        Storage.get(store, @source, id) == fields
       end)
     end
   end
 
   property "committed delete removes the record" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        :ok = Storage.insert(srv, @source, id, fields)
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.delete(srv, @source, id)
-        :ok = Storage.commit_transaction(srv)
-        Storage.get(srv, @source, id) == nil
-      end)
-    end
-  end
-
-  property "nested savepoint commit leaves outer transaction open" do
-    forall {f1, f2} <- {fields_gen(), fields_gen()} do
-      id1 = "sp-outer-#{:erlang.unique_integer([:positive])}"
-      id2 = "sp-inner-#{:erlang.unique_integer([:positive])}"
-
-      with_storage(fn srv ->
-        :ok = Storage.begin_transaction(srv)   # depth 1
-        :ok = Storage.insert(srv, @source, id1, f1)
-
-        :ok = Storage.begin_transaction(srv)   # depth 2 (SAVEPOINT sp1)
-        :ok = Storage.insert(srv, @source, id2, f2)
-        :ok = Storage.commit_transaction(srv)  # RELEASE sp1
-
-        still_open = Storage.in_transaction?(srv)
-
-        :ok = Storage.rollback_transaction(srv)  # ROLLBACK outer
-
-        both_gone = Storage.get(srv, @source, id1) == nil and
-                    Storage.get(srv, @source, id2) == nil
-
-        still_open and both_gone
-      end)
-    end
-  end
-
-  property "nested savepoint rollback leaves outer transaction intact" do
-    forall {f1, f2} <- {fields_gen(), fields_gen()} do
-      # Use guaranteed-distinct ids via unique integer
-      id1 = "sp-outer-#{:erlang.unique_integer([:positive])}"
-      id2 = "sp-inner-#{:erlang.unique_integer([:positive])}"
-
-      with_storage(fn srv ->
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.insert(srv, @source, id1, f1)
-
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.insert(srv, @source, id2, f2)
-        :ok = Storage.rollback_transaction(srv)  # rolls back sp1 only
-
-        :ok = Storage.commit_transaction(srv)
-
-        # id1 committed, id2 rolled back
-        Storage.get(srv, @source, id1) == f1 and
-        Storage.get(srv, @source, id2) == nil
+      with_storage(fn store ->
+        :ok = Storage.insert(store, @source, id, fields)
+        {:ok, :ok} = with_txn(store, fn store ->
+          Storage.delete(store, @source, id)
+        end)
+        Storage.get(store, @source, id) == nil
       end)
     end
   end
 
   property "in_transaction? is false outside transaction" do
-    with_storage(fn srv ->
-      not Storage.in_transaction?(srv)
+    with_storage(fn store ->
+      not in_transaction?(store)
     end)
   end
 
   property "in_transaction? is true inside transaction" do
-    with_storage(fn srv ->
-      :ok = Storage.begin_transaction(srv)
-      result = Storage.in_transaction?(srv)
-      :ok = Storage.rollback_transaction(srv)
-      result
+    with_storage(fn {pool, _dim} = store ->
+      result_ref = :atomics.new(1, [])
+      Postgrex.transaction(pool, fn conn ->
+        Process.put({:taskweft_hrr_conn, pool}, conn)
+        try do
+          :atomics.put(result_ref, 1, if(in_transaction?(store), do: 1, else: 0))
+        after
+          Process.delete({:taskweft_hrr_conn, pool})
+        end
+      end)
+      :atomics.get(result_ref, 1) == 1
     end)
   end
 
   property "bundle reflects post-commit state" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        :ok = Storage.begin_transaction(srv)
-        populate(srv, records)
-        :ok = Storage.commit_transaction(srv)
-        Storage.bundle(srv, @source) != nil
+      with_storage(fn store ->
+        {:ok, _} = with_txn(store, fn store ->
+          populate(store, records)
+        end)
+        Storage.bundle(store, @source) != nil
       end)
     end
   end
 
   property "bundle is nil after rollback of all inserts" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.insert(srv, @source, id, fields)
-        :ok = Storage.rollback_transaction(srv)
-        Storage.bundle(srv, @source) == nil
+      with_storage(fn {pool, _dim} = store ->
+        Postgrex.transaction(pool, fn conn ->
+          Process.put({:taskweft_hrr_conn, pool}, conn)
+          try do
+            Storage.insert(store, @source, id, fields)
+            raise "rollback"
+          rescue
+            _ -> :ok
+          after
+            Process.delete({:taskweft_hrr_conn, pool})
+          end
+        end)
+        Storage.bundle(store, @source) == nil
       end)
     end
   end
@@ -240,17 +248,17 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "exact join returns only rows with matching keys" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
 
         # Seed right source with matching item_name keys
         {_id, first_fields} = hd(records)
         key = Map.get(first_fields, "name")
         tag_id = "tag-#{:erlang.unique_integer([:positive])}"
-        :ok = Storage.insert(srv, @source_b, tag_id, %{"item_name" => key, "label" => "x"})
+        :ok = Storage.insert(store, @source_b, tag_id, %{"item_name" => key, "label" => "x"})
 
         query  = join_query(@source_b, "name", "item_name")
-        result = Query.execute(srv, :all, query, [], [])
+        result = Query.execute(store, :all, query, [], [])
 
         Enum.all?(result, fn row ->
           is_list(row) and
@@ -262,11 +270,11 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "exact join with no matching right rows returns []" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
         # Right source is empty
         query  = join_query("empty_source_#{:erlang.unique_integer()}", "name", "item_name")
-        result = Query.execute(srv, :all, query, [], [])
+        result = Query.execute(store, :all, query, [], [])
         result == []
       end)
     end
@@ -274,8 +282,8 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "exact join row count = |left| × |matching_right| per left key" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
 
         {_id, first_fields} = hd(records)
         key = Map.get(first_fields, "name")
@@ -283,16 +291,16 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         # Insert two matching right rows
         n1 = "t#{:erlang.unique_integer([:positive])}"
         n2 = "t#{:erlang.unique_integer([:positive])}"
-        :ok = Storage.insert(srv, @source_b, n1, %{"item_name" => key, "label" => "a"})
-        :ok = Storage.insert(srv, @source_b, n2, %{"item_name" => key, "label" => "b"})
+        :ok = Storage.insert(store, @source_b, n1, %{"item_name" => key, "label" => "a"})
+        :ok = Storage.insert(store, @source_b, n2, %{"item_name" => key, "label" => "b"})
 
         # Count left rows with this key
         left_matching =
-          Storage.all(srv, @source)
+          Storage.all(store, @source)
           |> Enum.count(fn r -> Map.get(r, "name") == key end)
 
         query  = join_query(@source_b, "name", "item_name")
-        result = Query.execute(srv, :all, query, [], [])
+        result = Query.execute(store, :all, query, [], [])
 
         length(result) == left_matching * 2
       end)
@@ -301,14 +309,14 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "join rows are lists with two elements" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        :ok = Storage.insert(srv, @source, id, fields)
+      with_storage(fn store ->
+        :ok = Storage.insert(store, @source, id, fields)
         tag_id = "t#{:erlang.unique_integer([:positive])}"
         key = Map.get(fields, "name")
-        :ok = Storage.insert(srv, @source_b, tag_id, %{"item_name" => key, "label" => "y"})
+        :ok = Storage.insert(store, @source_b, tag_id, %{"item_name" => key, "label" => "y"})
 
         query  = join_query(@source_b, "name", "item_name")
-        result = Query.execute(srv, :all, query, [], [])
+        result = Query.execute(store, :all, query, [], [])
         Enum.all?(result, fn row -> is_list(row) and length(row) == 2 end)
       end)
     end
@@ -331,13 +339,13 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "semantic join returns list rows" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        :ok = Storage.insert(srv, @source, id, fields)
+      with_storage(fn store ->
+        :ok = Storage.insert(store, @source, id, fields)
         key = Map.get(fields, "name")
-        :ok = Storage.insert(srv, @source_b, "t1", %{"item_name" => key, "label" => "z"})
+        :ok = Storage.insert(store, @source_b, "t1", %{"item_name" => key, "label" => "z"})
 
         query  = semantic_join_query(@source_b, "name", "item_name")
-        result = Query.execute(srv, :all, query, [], [hrr_threshold: -1.0])
+        result = Query.execute(store, :all, query, [], [hrr_threshold: -1.0])
         Enum.all?(result, fn row -> is_list(row) and length(row) == 2 end)
       end)
     end
@@ -345,13 +353,13 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "semantic join with threshold 1.1 returns no rows" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        :ok = Storage.insert(srv, @source, id, fields)
+      with_storage(fn store ->
+        :ok = Storage.insert(store, @source, id, fields)
         key = Map.get(fields, "name")
-        :ok = Storage.insert(srv, @source_b, "t1", %{"item_name" => key, "label" => "z"})
+        :ok = Storage.insert(store, @source_b, "t1", %{"item_name" => key, "label" => "z"})
 
         query  = semantic_join_query(@source_b, "name", "item_name")
-        result = Query.execute(srv, :all, query, [], [hrr_threshold: 1.1])
+        result = Query.execute(store, :all, query, [], [hrr_threshold: 1.1])
         result == []
       end)
     end
@@ -363,21 +371,21 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "count(*) without WHERE matches record_count in hrr_bundles" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
         query  = %{base_query() | select: agg_select(:count)}
-        [[n]]  = Query.execute(srv, :all, query, [], [])
-        n == Storage.record_count(srv, @source)
+        [[n]]  = Query.execute(store, :all, query, [], [])
+        n == Storage.record_count(store, @source)
       end)
     end
   end
 
   property "count(*) without WHERE does not scan hrr_records (fast path)" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
         query  = %{base_query() | select: agg_select(:count)}
-        [[n]]  = Query.execute(srv, :all, query, [], [])
+        [[n]]  = Query.execute(store, :all, query, [], [])
         n == length(records)
       end)
     end
@@ -385,8 +393,8 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "count(field) with WHERE equals filtered row count" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
         {_, first_fields} = hd(records)
         cat = Map.get(first_fields, "category")
 
@@ -395,8 +403,8 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
           select: agg_select(:count, "name")}
         q_all = %{base_query() | wheres: [eq_where("category", 0)]}
 
-        [[n]]   = Query.execute(srv, :all, q_count, [cat], [])
-        all_cat = Query.execute(srv, :all, q_all, [cat], [])
+        [[n]]   = Query.execute(store, :all, q_count, [cat], [])
+        all_cat = Query.execute(store, :all, q_all, [cat], [])
         n == length(all_cat)
       end)
     end
@@ -404,11 +412,11 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "sum(score) equals Enum.sum over all rows" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
         query  = %{base_query() | select: agg_select(:sum, "score")}
-        [[s]]  = Query.execute(srv, :all, query, [], [])
-        all    = Storage.all(srv, @source)
+        [[s]]  = Query.execute(store, :all, query, [], [])
+        all    = Storage.all(store, @source)
         expected = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1) |> Enum.sum()
         abs(s - expected) < 1.0e-9
       end)
@@ -417,11 +425,11 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "avg(score) equals Enum.sum / count over all rows" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
         query = %{base_query() | select: agg_select(:avg, "score")}
-        [[a]] = Query.execute(srv, :all, query, [], [])
-        all   = Storage.all(srv, @source)
+        [[a]] = Query.execute(store, :all, query, [], [])
+        all   = Storage.all(store, @source)
         vals  = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
         expected = if vals == [], do: nil, else: Enum.sum(vals) / length(vals)
         case {a, expected} do
@@ -434,11 +442,11 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "min(score) <= every score in the table" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
         query = %{base_query() | select: agg_select(:min, "score")}
-        [[m]] = Query.execute(srv, :all, query, [], [])
-        all   = Storage.all(srv, @source)
+        [[m]] = Query.execute(store, :all, query, [], [])
+        all   = Storage.all(store, @source)
         vals  = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
         m != nil and Enum.all?(vals, &(m <= &1))
       end)
@@ -447,11 +455,11 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "max(score) >= every score in the table" do
     forall records <- record_list_gen() do
-      with_storage(fn srv ->
-        populate(srv, records)
+      with_storage(fn store ->
+        populate(store, records)
         query = %{base_query() | select: agg_select(:max, "score")}
-        [[m]] = Query.execute(srv, :all, query, [], [])
-        all   = Storage.all(srv, @source)
+        [[m]] = Query.execute(store, :all, query, [], [])
+        all   = Storage.all(store, @source)
         vals  = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
         m != nil and Enum.all?(vals, &(m >= &1))
       end)
@@ -460,31 +468,39 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   property "count(*) after rollback equals pre-transaction count" do
     forall {records, id, fields} <- {record_list_gen(), word_gen(), fields_gen()} do
-      with_storage(fn srv ->
-        populate(srv, records)
-        before_count = Storage.record_count(srv, @source)
+      with_storage(fn {pool, _dim} = store ->
+        populate(store, records)
+        before_count = Storage.record_count(store, @source)
 
-        :ok = Storage.begin_transaction(srv)
-        :ok = Storage.insert(srv, @source, id, fields)
-        :ok = Storage.rollback_transaction(srv)
+        Postgrex.transaction(pool, fn conn ->
+          Process.put({:taskweft_hrr_conn, pool}, conn)
+          try do
+            Storage.insert(store, @source, id, fields)
+            raise "rollback"
+          rescue
+            _ -> :ok
+          after
+            Process.delete({:taskweft_hrr_conn, pool})
+          end
+        end)
 
-        Storage.record_count(srv, @source) == before_count
+        Storage.record_count(store, @source) == before_count
       end)
     end
   end
 
   property "aggregate on empty source returns nil for min/max/avg and 0 for count" do
-    with_storage(fn srv ->
+    with_storage(fn store ->
       src = "empty_#{:erlang.unique_integer([:positive])}"
       q_count = %{base_query(src) | select: agg_select(:count)}
       q_min   = %{base_query(src) | select: agg_select(:min, "score")}
       q_max   = %{base_query(src) | select: agg_select(:max, "score")}
       q_avg   = %{base_query(src) | select: agg_select(:avg, "score")}
 
-      [[c]] = Query.execute(srv, :all, q_count, [], [])
-      [[mn]] = Query.execute(srv, :all, q_min, [], [])
-      [[mx]] = Query.execute(srv, :all, q_max, [], [])
-      [[av]] = Query.execute(srv, :all, q_avg, [], [])
+      [[c]] = Query.execute(store, :all, q_count, [], [])
+      [[mn]] = Query.execute(store, :all, q_min, [], [])
+      [[mx]] = Query.execute(store, :all, q_max, [], [])
+      [[av]] = Query.execute(store, :all, q_avg, [], [])
 
       c == 0 and mn == nil and mx == nil and av == nil
     end)

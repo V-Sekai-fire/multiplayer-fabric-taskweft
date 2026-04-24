@@ -47,9 +47,9 @@ defmodule Taskweft.HRR.Query do
 
   @default_hrr_threshold 0.1
 
-  @doc "Execute a compiled Ecto `:all` query against *srv*."
-  @spec execute(GenServer.server(), :all, term(), list(), keyword()) :: [map()]
-  def execute(srv, :all, query, params, opts) do
+  @doc "Execute a compiled Ecto `:all` query against *store*."
+  @spec execute(Storage.store(), :all, term(), list(), keyword()) :: [map()]
+  def execute(store, :all, query, params, opts) do
     threshold = Keyword.get(opts, :hrr_threshold, @default_hrr_threshold)
     wheres    = Map.get(query, :wheres, [])
     joins     = Map.get(query, :joins, [])
@@ -62,11 +62,11 @@ defmodule Taskweft.HRR.Query do
       {:ok, source} ->
         case aggregate_expr(select) do
           {:count_all} when joins == [] and wheres == [] ->
-            [[Storage.record_count(srv, source)]]
+            [[Storage.record_count(store, source)]]
 
           agg_expr ->
-            rows = fetch_rows(srv, source, wheres, params, threshold)
-            rows = apply_joins(srv, rows, joins, params, threshold)
+            rows = fetch_rows(store, source, wheres, params, threshold)
+            rows = apply_joins(store, rows, joins, params, threshold)
 
             if agg_expr do
               [[compute_aggregate(rows, agg_expr)]]
@@ -83,22 +83,22 @@ defmodule Taskweft.HRR.Query do
   # Row fetching
   # ---------------------------------------------------------------------------
 
-  defp fetch_rows(srv, source, [], _params, _threshold),
-    do: Storage.all(srv, source)
+  defp fetch_rows(store, source, [], _params, _threshold),
+    do: Storage.all(store, source)
 
-  defp fetch_rows(srv, source, [%{expr: expr}], params, threshold) do
+  defp fetch_rows(store, source, [%{expr: expr}], params, threshold) do
     case extract_probe(expr, params) do
       {:probe_field, field, text} ->
-        Storage.probe_field(srv, source, field, text, threshold: threshold)
+        Storage.probe_field(store, source, field, text, threshold: threshold)
         |> Enum.map(fn {_sim, map} -> map end)
 
       :exact ->
-        Storage.all(srv, source) |> Enum.filter(&eval_expr(&1, expr, params))
+        Storage.all(store, source) |> Enum.filter(&eval_expr(&1, expr, params))
     end
   end
 
-  defp fetch_rows(srv, source, wheres, params, _threshold) do
-    Storage.all(srv, source)
+  defp fetch_rows(store, source, wheres, params, _threshold) do
+    Storage.all(store, source)
     |> Enum.filter(fn row ->
       Enum.all?(wheres, fn %{expr: expr} -> eval_expr(row, expr, params) end)
     end)
@@ -108,15 +108,15 @@ defmodule Taskweft.HRR.Query do
   # Joins
   # ---------------------------------------------------------------------------
 
-  defp apply_joins(_srv, rows, [], _params, _threshold), do: rows
+  defp apply_joins(_store, rows, [], _params, _threshold), do: rows
 
-  defp apply_joins(srv, left_rows, joins, params, threshold) do
+  defp apply_joins(store, left_rows, joins, params, threshold) do
     Enum.reduce(joins, left_rows, fn join_expr, acc ->
-      apply_one_join(srv, acc, join_expr, params, threshold)
+      apply_one_join(store, acc, join_expr, params, threshold)
     end)
   end
 
-  defp apply_one_join(srv, left_rows, join_expr, params, threshold) do
+  defp apply_one_join(store, left_rows, join_expr, params, threshold) do
     case join_source(join_expr) do
       nil ->
         []
@@ -126,21 +126,21 @@ defmodule Taskweft.HRR.Query do
 
         case join_strategy(on_expr, params) do
           {:exact, left_field, right_field} ->
-            exact_join(srv, left_rows, right_source, left_field, right_field)
+            exact_join(store, left_rows, right_source, left_field, right_field)
 
           {:semantic, left_field, right_field} ->
-            semantic_join(srv, left_rows, right_source, left_field, right_field, threshold)
+            semantic_join(store, left_rows, right_source, left_field, right_field, threshold)
 
           :cross ->
-            right_rows = Storage.all(srv, right_source)
+            right_rows = Storage.all(store, right_source)
             for l <- left_rows, r <- right_rows, do: join_row(l, r)
         end
     end
   end
 
-  defp exact_join(srv, left_rows, right_source, left_field, right_field) do
+  defp exact_join(store, left_rows, right_source, left_field, right_field) do
     right_by_key =
-      Storage.all(srv, right_source)
+      Storage.all(store, right_source)
       |> Enum.group_by(&Map.get(&1, to_string(right_field)))
 
     Enum.flat_map(left_rows, fn left ->
@@ -149,9 +149,9 @@ defmodule Taskweft.HRR.Query do
     end)
   end
 
-  defp semantic_join(srv, left_rows, right_source, left_field, right_field, threshold) do
-    dim          = Storage.dim(srv)
-    right_probes = Storage.vectors_for_join(srv, right_source, to_string(right_field))
+  defp semantic_join(store, left_rows, right_source, left_field, right_field, threshold) do
+    {_pool, dim}  = store
+    right_probes  = Storage.vectors_for_join(store, right_source, to_string(right_field))
 
     Enum.flat_map(left_rows, fn left ->
       query_text   = left_field_value(left, left_field) |> to_string()
