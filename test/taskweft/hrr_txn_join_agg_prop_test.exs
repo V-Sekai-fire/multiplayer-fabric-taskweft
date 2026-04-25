@@ -9,6 +9,14 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   @dim 64
   @source "items"
   @source_b "tags"
+  @pool :hrr_txn_prop_pool
+
+  setup_all do
+    {:ok, _} = Taskweft.Test.DBHelpers.start_pool(@pool)
+    Storage.ensure_schema!(@pool)
+    on_exit(fn -> GenServer.stop(@pool) end)
+    :ok
+  end
 
   # ---------------------------------------------------------------------------
   # Generators
@@ -46,18 +54,14 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    pool_name = :"hrr_tja_#{:erlang.unique_integer([:positive])}"
-    {:ok, _} = Taskweft.Test.DBHelpers.start_pool(pool_name)
-    Storage.ensure_schema!(pool_name)
-    Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
-    Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
-    store = {pool_name, @dim}
+    Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
+    Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
+    store = {@pool, @dim}
     try do
       fun.(store)
     after
-      Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
-      Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
-      GenServer.stop(pool_name)
+      Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
+      Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
     end
   end
 
@@ -134,10 +138,9 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
           Process.put({:taskweft_hrr_conn, pool}, conn)
           try do
             Storage.insert(store, @source, id, fields)
-            # Raise to trigger rollback
-            raise "rollback"
-          rescue
-            _ -> :ok
+            # Postgrex.rollback signals rollback without raising, so
+            # Postgrex.transaction returns {:error, :rollback} cleanly.
+            Postgrex.rollback(conn, :rollback)
           after
             Process.delete({:taskweft_hrr_conn, pool})
           end
@@ -155,9 +158,7 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
           Process.put({:taskweft_hrr_conn, pool}, conn)
           try do
             Storage.delete(store, @source, id)
-            raise "rollback"
-          rescue
-            _ -> :ok
+            Postgrex.rollback(conn, :rollback)
           after
             Process.delete({:taskweft_hrr_conn, pool})
           end
@@ -218,9 +219,7 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
           Process.put({:taskweft_hrr_conn, pool}, conn)
           try do
             Storage.insert(store, @source, id, fields)
-            raise "rollback"
-          rescue
-            _ -> :ok
+            Postgrex.rollback(conn, :rollback)
           after
             Process.delete({:taskweft_hrr_conn, pool})
           end
@@ -475,9 +474,7 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
           Process.put({:taskweft_hrr_conn, pool}, conn)
           try do
             Storage.insert(store, @source, id, fields)
-            raise "rollback"
-          rescue
-            _ -> :ok
+            Postgrex.rollback(conn, :rollback)
           after
             Process.delete({:taskweft_hrr_conn, pool})
           end

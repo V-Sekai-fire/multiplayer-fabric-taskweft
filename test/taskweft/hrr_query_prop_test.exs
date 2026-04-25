@@ -8,6 +8,14 @@ defmodule Taskweft.HRR.QueryPropTest do
 
   @dim 64
   @source "test_items"
+  @pool :hrr_query_prop_pool
+
+  setup_all do
+    {:ok, _} = Taskweft.Test.DBHelpers.start_pool(@pool)
+    Storage.ensure_schema!(@pool)
+    on_exit(fn -> GenServer.stop(@pool) end)
+    :ok
+  end
 
   # ---------------------------------------------------------------------------
   # Generators
@@ -88,18 +96,14 @@ defmodule Taskweft.HRR.QueryPropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    pool_name = :"hrr_query_test_#{:erlang.unique_integer([:positive])}"
-    {:ok, _} = Taskweft.Test.DBHelpers.start_pool(pool_name)
-    Storage.ensure_schema!(pool_name)
-    Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
-    Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
-    store = {pool_name, @dim}
+    Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
+    Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
+    store = {@pool, @dim}
     try do
       fun.(store)
     after
-      Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
-      Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
-      GenServer.stop(pool_name)
+      Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
+      Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
     end
   end
 

@@ -7,6 +7,20 @@ defmodule Taskweft.HRR.StoragePropTest do
   alias Taskweft.HRR.Storage
 
   @dim 64
+  @pool :hrr_storage_prop_pool
+
+  # ---------------------------------------------------------------------------
+  # Module-level pool — started once, reused across all forall iterations.
+  # Opening a fresh TLS connection per iteration causes timeout during
+  # PropCheck's rapid shrinking phase; a single persistent pool avoids that.
+  # ---------------------------------------------------------------------------
+
+  setup_all do
+    {:ok, _} = Taskweft.Test.DBHelpers.start_pool(@pool)
+    Storage.ensure_schema!(@pool)
+    on_exit(fn -> GenServer.stop(@pool) end)
+    :ok
+  end
 
   # ---------------------------------------------------------------------------
   # Generators
@@ -44,18 +58,14 @@ defmodule Taskweft.HRR.StoragePropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    pool_name = :"hrr_test_#{:erlang.unique_integer([:positive])}"
-    {:ok, _pid} = Taskweft.Test.DBHelpers.start_pool(pool_name)
-    Storage.ensure_schema!(pool_name)
-    Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
-    Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
-    store = {pool_name, @dim}
+    Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
+    Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
+    store = {@pool, @dim}
     try do
       fun.(store)
     after
-      Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
-      Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
-      GenServer.stop(pool_name)
+      Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
+      Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
     end
   end
 
@@ -371,23 +381,20 @@ defmodule Taskweft.HRR.StoragePropTest do
 
   property "records survive pool restart" do
     forall {source, id, fields} <- {source_gen(), id_gen(), fields_gen()} do
-      pool1 = :"hrr_persist_#{:erlang.unique_integer([:positive])}"
-      {:ok, _pid1} = Taskweft.Test.DBHelpers.start_pool(pool1)
-      Storage.ensure_schema!(pool1)
-
-      store1 = {pool1, @dim}
+      # This property specifically tests persistence across pool restart,
+      # so it needs its own temporary pool that it can stop and restart.
+      # Use the module pool as the "second" connection to avoid TLS setup overhead.
+      Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
+      store1 = {@pool, @dim}
       :ok = Storage.insert(store1, source, id, fields)
-      GenServer.stop(pool1)
 
-      pool2 = :"hrr_persist2_#{:erlang.unique_integer([:positive])}"
-      {:ok, _pid2} = Taskweft.Test.DBHelpers.start_pool(pool2)
-      store2 = {pool2, @dim}
-
+      # Simulate pool restart: stop and restart a temp pool, then read back.
+      tmp = :"hrr_persist_#{:erlang.unique_integer([:positive])}"
+      {:ok, _} = Taskweft.Test.DBHelpers.start_pool(tmp)
+      store2 = {tmp, @dim}
       result = Storage.get(store2, source, id)
-
-      # Clean up the inserted row so tests are isolated
       Storage.delete(store2, source, id)
-      GenServer.stop(pool2)
+      GenServer.stop(tmp)
 
       result == fields
     end

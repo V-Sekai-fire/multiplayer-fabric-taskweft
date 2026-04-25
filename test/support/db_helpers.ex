@@ -27,7 +27,7 @@ defmodule Taskweft.Test.DBHelpers do
   """
 
   @default_crdb_certs_dir Path.expand(
-    "../../../../multiplayer-fabric-hosting/certs/crdb",
+    "../../../multiplayer-fabric-hosting/certs/crdb",
     __DIR__
   )
 
