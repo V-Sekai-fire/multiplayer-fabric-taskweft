@@ -286,7 +286,8 @@ defmodule Taskweft.HRR.Storage do
   defp query_all({pool, _dim}, sql, params) do
     conn = Process.get({:taskweft_hrr_conn, pool}) || pool
     %Postgrex.Result{columns: cols, rows: rows} = Postgrex.query!(conn, sql, params)
-    Enum.map(rows, fn row -> Enum.zip(cols, row) |> Map.new() end)
+    # rows is nil for DML statements (INSERT/UPDATE/DELETE) in Postgrex.
+    Enum.map(rows || [], fn row -> Enum.zip(cols, row) |> Map.new() end)
   end
 
   # ---------------------------------------------------------------------------

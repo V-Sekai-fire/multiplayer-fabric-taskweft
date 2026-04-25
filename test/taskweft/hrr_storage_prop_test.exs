@@ -44,9 +44,8 @@ defmodule Taskweft.HRR.StoragePropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    url = System.get_env("TEST_DATABASE_URL", "postgresql://root@localhost:26257/taskweft_test?sslmode=disable")
     pool_name = :"hrr_test_#{:erlang.unique_integer([:positive])}"
-    {:ok, _pid} = Postgrex.start_link(name: pool_name, url: url)
+    {:ok, _pid} = Taskweft.Test.DBHelpers.start_pool(pool_name)
     Storage.ensure_schema!(pool_name)
     Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
     Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
@@ -372,10 +371,8 @@ defmodule Taskweft.HRR.StoragePropTest do
 
   property "records survive pool restart" do
     forall {source, id, fields} <- {source_gen(), id_gen(), fields_gen()} do
-      url = System.get_env("TEST_DATABASE_URL", "postgresql://root@localhost:26257/taskweft_test?sslmode=disable")
-
       pool1 = :"hrr_persist_#{:erlang.unique_integer([:positive])}"
-      {:ok, _pid1} = Postgrex.start_link(name: pool1, url: url)
+      {:ok, _pid1} = Taskweft.Test.DBHelpers.start_pool(pool1)
       Storage.ensure_schema!(pool1)
 
       store1 = {pool1, @dim}
@@ -383,7 +380,7 @@ defmodule Taskweft.HRR.StoragePropTest do
       GenServer.stop(pool1)
 
       pool2 = :"hrr_persist2_#{:erlang.unique_integer([:positive])}"
-      {:ok, _pid2} = Postgrex.start_link(name: pool2, url: url)
+      {:ok, _pid2} = Taskweft.Test.DBHelpers.start_pool(pool2)
       store2 = {pool2, @dim}
 
       result = Storage.get(store2, source, id)

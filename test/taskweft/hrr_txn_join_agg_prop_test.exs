@@ -46,9 +46,8 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    url = System.get_env("TEST_DATABASE_URL", "postgresql://root@localhost:26257/taskweft_test?sslmode=disable")
     pool_name = :"hrr_tja_#{:erlang.unique_integer([:positive])}"
-    {:ok, _} = Postgrex.start_link(name: pool_name, url: url)
+    {:ok, _} = Taskweft.Test.DBHelpers.start_pool(pool_name)
     Storage.ensure_schema!(pool_name)
     Postgrex.query!(pool_name, "DELETE FROM hrr_records", [])
     Postgrex.query!(pool_name, "DELETE FROM hrr_bundles", [])
