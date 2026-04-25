@@ -61,7 +61,6 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
       GenServer.stop(pool_name)
     end
   end
-  end
 
   defp populate(store, records, source \\ @source) do
     Enum.each(records, fn {id, fields} ->

@@ -103,7 +103,6 @@ defmodule Taskweft.HRR.QueryPropTest do
       GenServer.stop(pool_name)
     end
   end
-  end
 
   defp populate(store, records) do
     Enum.each(records, fn {id, fields} ->

@@ -59,7 +59,6 @@ defmodule Taskweft.HRR.StoragePropTest do
       GenServer.stop(pool_name)
     end
   end
-  end
 
   # ---------------------------------------------------------------------------
   # insert / get roundtrip
