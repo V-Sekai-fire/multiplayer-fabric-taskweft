@@ -15,3 +15,8 @@ lean_lib «HRR» where
 @[default_target]
 lean_lib «Planner» where
   srcDir := "."
+
+-- WASM equivalence: libriscv + taskweft purity across execution environments
+@[default_target]
+lean_lib «WasmEquiv» where
+  srcDir := "."
