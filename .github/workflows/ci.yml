@@ -42,6 +42,7 @@ jobs:
         run: |
           docker run -d --name crdb \
             -p 26257:26257 -p 8080:8080 \
+            --entrypoint /cockroach/cockroach \
             ghcr.io/v-sekai/cockroach:latest \
             start-single-node --insecure \
             --listen-addr=0.0.0.0:26257 \
