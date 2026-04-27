@@ -46,9 +46,11 @@ jobs:
             start-single-node --insecure \
             --listen-addr=0.0.0.0:26257 \
             --http-addr=0.0.0.0:8080
-          until docker exec crdb cockroach sql --insecure -e "SELECT 1" 2>/dev/null; do
+          for i in $(seq 1 60); do
+            docker exec crdb cockroach sql --insecure -e "SELECT 1" 2>/dev/null && break
             sleep 1
           done
+          docker exec crdb cockroach sql --insecure -e "SELECT 1" || (docker logs crdb && exit 1)
 
       - name: Create test database
         run: docker exec crdb cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS taskweft_test;"
