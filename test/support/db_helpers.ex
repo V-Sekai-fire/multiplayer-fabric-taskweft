@@ -2,34 +2,21 @@ defmodule Taskweft.Test.DBHelpers do
   @moduledoc """
   Shared helper for starting a Postgrex pool in property tests.
 
-  Reads connection options from environment variables so that the same
-  test code works against both insecure (dev) and TLS-secured (CI/Docker)
-  CockroachDB instances.
+  Connection resolution order:
+    1. `TEST_DATABASE_URL` env var — full Postgres URL, used as-is.
+    2. macOS Keychain via `Taskweft.Test.CertManager` — TLS creds stored under
+       service "multiplayer-fabric-crdb" (see scripts/setup_keychain_certs.sh).
+    3. Plain insecure connection — falls back when no creds are available.
 
-  ## Environment variables
-
-  | Variable            | Purpose                                             |
-  |---------------------|-----------------------------------------------------|
-  | `TEST_DATABASE_URL` | Full Postgres URL (used when set; overrides all)    |
-  | `TEST_DB_HOST`      | Hostname (default: localhost)                       |
-  | `TEST_DB_PORT`      | Port    (default: 26257)                            |
-  | `TEST_DB_NAME`      | Database name (default: taskweft_test)              |
-  | `TEST_DB_USER`      | Username (default: root)                            |
-  | `TEST_DB_CA_CERT`   | Path to CA cert (enables TLS when set)              |
-  | `TEST_DB_CERT`      | Path to client cert (required with CA cert)         |
-  | `TEST_DB_KEY`       | Path to client key  (required with CA cert)         |
-  | `TEST_DB_SNI`       | TLS server name indication (default: localhost)     |
-
-  If none of the above are set and the default cert location exists
-  (`multiplayer-fabric-hosting/certs/crdb/`), TLS options are inferred
-  automatically so local development with the Docker stack works without
-  any extra environment setup.
+  Host/port/db/user can be overridden with:
+    TEST_DB_HOST  (default: localhost)
+    TEST_DB_PORT  (default: 26257)
+    TEST_DB_NAME  (default: taskweft_test)
+    TEST_DB_USER  (default: root)
+    TEST_DB_SNI   (default: localhost)
   """
 
-  @default_crdb_certs_dir Path.expand(
-    "../../../multiplayer-fabric-hosting/certs/crdb",
-    __DIR__
-  )
+  alias Taskweft.Test.CertManager
 
   @spec start_pool(atom()) :: {:ok, pid()} | {:error, term()}
   def start_pool(name) do
@@ -43,47 +30,24 @@ defmodule Taskweft.Test.DBHelpers do
         [url: url]
 
       _ ->
-        tls_opts()
+        base_opts() ++ ssl_opts()
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Private
-  # ---------------------------------------------------------------------------
-
-  defp tls_opts do
-    ca   = env_or("TEST_DB_CA_CERT",   Path.join(@default_crdb_certs_dir, "ca.crt"))
-    cert = env_or("TEST_DB_CERT",      Path.join(@default_crdb_certs_dir, "client.root.crt"))
-    key  = env_or("TEST_DB_KEY",       Path.join(@default_crdb_certs_dir, "client.root.key"))
-    host = System.get_env("TEST_DB_HOST", "localhost")
-    port = System.get_env("TEST_DB_PORT", "26257") |> String.to_integer()
-    db   = System.get_env("TEST_DB_NAME", "taskweft_test")
-    user = System.get_env("TEST_DB_USER", "root")
-    sni  = System.get_env("TEST_DB_SNI",  "localhost") |> String.to_charlist()
-
-    if File.exists?(ca) do
-      [
-        hostname: host,
-        port: port,
-        database: db,
-        username: user,
-        ssl: [
-          cacertfile: ca,
-          certfile: cert,
-          keyfile: key,
-          server_name_indication: sni,
-          verify: :verify_peer
-        ]
-      ]
-    else
-      [
-        hostname: host,
-        port: port,
-        database: db,
-        username: user
-      ]
-    end
+  defp base_opts do
+    [
+      hostname: System.get_env("TEST_DB_HOST", "localhost"),
+      port:     System.get_env("TEST_DB_PORT", "26257") |> String.to_integer(),
+      database: System.get_env("TEST_DB_NAME", "taskweft_test"),
+      username: System.get_env("TEST_DB_USER", "root")
+    ]
   end
 
-  defp env_or(var, default), do: System.get_env(var, default)
+  defp ssl_opts do
+    sni = System.get_env("TEST_DB_SNI", "localhost") |> String.to_charlist()
+    case CertManager.ssl_opts(sni) do
+      nil  -> []
+      opts -> [ssl: opts]
+    end
+  end
 end
