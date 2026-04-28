@@ -29,6 +29,9 @@ defmodule Taskweft.MixProject do
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
       {:jason, "~> 1.4"},
+      {:instructor, "~> 0.1"},
+      {:ex_mcp, github: "azmaveth/ex_mcp"},
+      {:dotenvy, "~> 0.8"},
       {:propcheck, "~> 1.4", only: [:test, :dev], runtime: false}
     ]
   end
