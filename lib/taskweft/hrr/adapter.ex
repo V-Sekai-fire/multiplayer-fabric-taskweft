@@ -252,7 +252,7 @@ defmodule Taskweft.HRR.Adapter do
   # Crypto-based UUID v4 that works with or without Ecto loaded.
   defp generate_uuid do
     if Code.ensure_loaded?(Ecto.UUID) do
-      Ecto.UUID.generate()
+      apply(Ecto.UUID, :generate, [])
     else
       hex = :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
       <<a::binary-8, b::binary-4, c::binary-4, d::binary-4, e::binary-12>> = hex
