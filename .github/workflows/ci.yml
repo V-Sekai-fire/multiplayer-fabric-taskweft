@@ -18,7 +18,6 @@ jobs:
 
     env:
       MIX_ENV: test
-      TEST_DATABASE_URL: "postgresql://root@localhost:26257/taskweft_test?sslmode=disable"
 
     steps:
       - uses: actions/checkout@v4
@@ -37,24 +36,6 @@ jobs:
             _build
           key: ${{ runner.os }}-taskweft-mix-${{ hashFiles('mix.lock') }}
           restore-keys: ${{ runner.os }}-taskweft-mix-
-
-      - name: Start CockroachDB
-        run: |
-          docker run -d --name crdb \
-            -p 26257:26257 -p 8080:8080 \
-            --entrypoint /cockroach/cockroach \
-            ghcr.io/v-sekai/cockroach:latest \
-            start-single-node --insecure \
-            --listen-addr=0.0.0.0:26257 \
-            --http-addr=0.0.0.0:8080
-          for i in $(seq 1 60); do
-            docker exec crdb cockroach sql --insecure -e "SELECT 1" 2>/dev/null && break
-            sleep 1
-          done
-          docker exec crdb cockroach sql --insecure -e "SELECT 1" || (docker logs crdb && exit 1)
-
-      - name: Create test database
-        run: docker exec crdb cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS taskweft_test;"
 
       - name: Install dependencies
         run: mix deps.get

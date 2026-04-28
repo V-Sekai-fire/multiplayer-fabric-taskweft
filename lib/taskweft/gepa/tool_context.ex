@@ -15,6 +15,7 @@ defmodule Taskweft.GEPA.ToolContext do
     case Process.whereis(ToolRegistry) do
       nil ->
         ""
+
       _ ->
         Registry.list_tools(ToolRegistry)
         |> Enum.map_join("\n", fn t ->

@@ -34,6 +34,7 @@ defmodule Taskweft.GEPA.Blackboard do
   @spec get(term()) :: term()
   def get(key) do
     ensure_table()
+
     case :ets.lookup(@table, key) do
       [{^key, _hrr_bytes, value}] -> value
       [] -> nil

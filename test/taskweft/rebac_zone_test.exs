@@ -55,8 +55,10 @@ defmodule Taskweft.ReBACZoneTest do
   # ── Property tests ─────────────────────────────────────────────────────────
 
   def id_gen do
-    let chars <- non_empty(list(range(?a, ?z))),
-        do: List.to_string(chars)
+    let(
+      chars <- non_empty(list(range(?a, ?z))),
+      do: List.to_string(chars)
+    )
   end
 
   property "CAN_ENTER: add_edge always grants access to subject" do

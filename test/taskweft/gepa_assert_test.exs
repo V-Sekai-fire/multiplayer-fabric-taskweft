@@ -11,6 +11,7 @@ defmodule Taskweft.GEPA.AssertTest do
 
   @tag :red
   test "assert_/2 returns {:backtrack, label} when predicate fails" do
-    assert {:backtrack, :hp_positive} = Taskweft.GEPA.Assert.assert_(:hp_positive, fn -> false end)
+    assert {:backtrack, :hp_positive} =
+             Taskweft.GEPA.Assert.assert_(:hp_positive, fn -> false end)
   end
 end

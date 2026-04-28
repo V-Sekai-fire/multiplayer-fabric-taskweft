@@ -164,12 +164,16 @@ defmodule Taskweft do
   Hybrid retrieval scoring of candidate facts.
   """
   def retriever_score(candidates_json, query_text, query_hrr_bytes, opts \\ []) do
-    NIF.retriever_score(candidates_json, query_text, query_hrr_bytes,
+    NIF.retriever_score(
+      candidates_json,
+      query_text,
+      query_hrr_bytes,
       Keyword.get(opts, :fts_w, 0.3),
       Keyword.get(opts, :jaccard_w, 0.3),
       Keyword.get(opts, :hrr_w, 0.4),
       Keyword.get(opts, :half_life_days, 30.0),
-      Keyword.get(opts, :dim, 256))
+      Keyword.get(opts, :dim, 256)
+    )
   end
 
   @doc """

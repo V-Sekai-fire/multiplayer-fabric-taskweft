@@ -4,12 +4,21 @@ defmodule Taskweft.ReBACPropTest do
 
   alias Taskweft.ReBAC
 
-  @relations ["OWNS", "CONTROLS", "IS_MEMBER_OF", "DELEGATED_TO",
-              "HAS_CAPABILITY", "SUPERVISOR_OF", "PARTNER_OF"]
+  @relations [
+    "OWNS",
+    "CONTROLS",
+    "IS_MEMBER_OF",
+    "DELEGATED_TO",
+    "HAS_CAPABILITY",
+    "SUPERVISOR_OF",
+    "PARTNER_OF"
+  ]
 
   def name_gen do
-    let chars <- non_empty(list(range(?a, ?z))),
-        do: List.to_string(chars)
+    let(
+      chars <- non_empty(list(range(?a, ?z))),
+      do: List.to_string(chars)
+    )
   end
 
   def rel_gen, do: oneof(Enum.map(@relations, &exactly/1))
@@ -42,16 +51,21 @@ defmodule Taskweft.ReBACPropTest do
         ReBAC.new_graph()
         |> ReBAC.add_edge(subj, obj, "OWNS")
 
-      expr = ~s({"type":"union","a":{"type":"base","rel":"OWNS"},"b":{"type":"base","rel":"CONTROLS"}})
+      expr =
+        ~s({"type":"union","a":{"type":"base","rel":"OWNS"},"b":{"type":"base","rel":"CONTROLS"}})
+
       ReBAC.check(g, subj, expr, obj)
     end
   end
 
   property "intersection expr: requires both branches" do
     forall {subj, obj} <- {name_gen(), name_gen()} do
-      g_one  = ReBAC.new_graph() |> ReBAC.add_edge(subj, obj, "OWNS")
+      g_one = ReBAC.new_graph() |> ReBAC.add_edge(subj, obj, "OWNS")
       g_both = ReBAC.add_edge(g_one, subj, obj, "CONTROLS")
-      expr   = ~s({"type":"intersection","a":{"type":"base","rel":"OWNS"},"b":{"type":"base","rel":"CONTROLS"}})
+
+      expr =
+        ~s({"type":"intersection","a":{"type":"base","rel":"OWNS"},"b":{"type":"base","rel":"CONTROLS"}})
+
       not ReBAC.check(g_one, subj, expr, obj) and
         ReBAC.check(g_both, subj, expr, obj)
     end
@@ -82,8 +96,8 @@ defmodule Taskweft.ReBACPropTest do
   property "parse_relation_edges: owns sentence creates OWNS edge" do
     forall {subj, obj} <- {name_gen(), name_gen()} do
       sentence = "#{String.capitalize(subj)} owns #{String.capitalize(obj)}."
-      facts    = ~s([{"content": "#{sentence}", "trust_score": 0.9}])
-      graph    = ReBAC.parse_relation_edges(facts)
+      facts = ~s([{"content": "#{sentence}", "trust_score": 0.9}])
+      graph = ReBAC.parse_relation_edges(facts)
       is_binary(graph) and String.contains?(graph, "OWNS")
     end
   end
@@ -91,8 +105,8 @@ defmodule Taskweft.ReBACPropTest do
   property "parse_relation_edges: low trust facts produce no OWNS edge" do
     forall {subj, obj} <- {name_gen(), name_gen()} do
       sentence = "#{String.capitalize(subj)} owns #{String.capitalize(obj)}."
-      facts    = ~s([{"content": "#{sentence}", "trust_score": 0.1}])
-      graph    = ReBAC.parse_relation_edges(facts, 0.5)
+      facts = ~s([{"content": "#{sentence}", "trust_score": 0.1}])
+      graph = ReBAC.parse_relation_edges(facts, 0.5)
       graph =~ ~s("edges":[]) or not (graph =~ "OWNS")
     end
   end

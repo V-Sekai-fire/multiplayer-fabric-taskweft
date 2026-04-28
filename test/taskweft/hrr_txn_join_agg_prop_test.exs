@@ -9,12 +9,19 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   @dim 64
   @source "items"
   @source_b "tags"
-  @pool :hrr_txn_prop_pool
+  @table :hrr_txn_prop_table
 
   setup_all do
-    {:ok, _} = Taskweft.Test.DBHelpers.start_pool(@pool)
-    Storage.ensure_schema!(@pool)
-    on_exit(fn -> GenServer.stop(@pool) end)
+    path =
+      Path.join(System.tmp_dir!(), "hrr_txn_test_#{:erlang.unique_integer([:positive])}.dets")
+
+    {:ok, _} = Storage.open_table(@table, path)
+
+    on_exit(fn ->
+      Storage.close_table(@table)
+      File.rm(path)
+    end)
+
     :ok
   end
 
@@ -23,8 +30,10 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   # ---------------------------------------------------------------------------
 
   def word_gen do
-    let chars <- non_empty(list(oneof([range(?a, ?z)]))),
+    let(
+      chars <- non_empty(list(oneof([range(?a, ?z)]))),
       do: to_string(chars)
+    )
   end
 
   def num_gen, do: let(n <- integer(1, 100), do: n * 1.0)
@@ -32,12 +41,6 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   def fields_gen do
     let {name, cat, score} <- {word_gen(), word_gen(), num_gen()} do
       %{"name" => name, "category" => cat, "score" => score}
-    end
-  end
-
-  def tag_fields_gen(item_name) do
-    let label <- word_gen() do
-      %{"item_name" => item_name, "label" => label}
     end
   end
 
@@ -54,14 +57,13 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
-    Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
-    store = {@pool, @dim}
+    :dets.delete_all_objects(@table)
+    store = {@table, @dim}
+
     try do
       fun.(store)
     after
-      Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
-      Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
+      :dets.delete_all_objects(@table)
     end
   end
 
@@ -72,8 +74,15 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   end
 
   defp base_query(source \\ @source) do
-    %{from: %{source: {source, nil}}, wheres: [], order_bys: [], joins: [],
-      limit: nil, offset: nil, select: nil}
+    %{
+      from: %{source: {source, nil}},
+      wheres: [],
+      order_bys: [],
+      joins: [],
+      limit: nil,
+      offset: nil,
+      select: nil
+    }
   end
 
   defp eq_where(field, idx) do
@@ -82,6 +91,7 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   defp field_ref(f) when is_atom(f),
     do: {{:., [], [{:&, [], [0]}, f]}, [], []}
+
   defp field_ref(f),
     do: field_ref(String.to_atom(f))
 
@@ -92,141 +102,46 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
       if field,
         do: {fun, [], [field_ref(field)]},
         else: {fun, [], []}
+
     %{expr: expr}
   end
 
   # ---------------------------------------------------------------------------
-  # Transaction helpers using Postgrex.transaction/3
+  # Insert/delete lifecycle (replaces transaction rollback tests)
   # ---------------------------------------------------------------------------
 
-  # Run fun inside a Postgrex transaction, making the connection visible to
-  # Storage calls via the process dictionary key {:taskweft_hrr_conn, pool}.
-  defp with_txn({pool, _dim} = store, fun) do
-    Postgrex.transaction(pool, fn conn ->
-      Process.put({:taskweft_hrr_conn, pool}, conn)
-      try do
-        fun.(store)
-      after
-        Process.delete({:taskweft_hrr_conn, pool})
-      end
-    end)
-  end
-
-  defp in_transaction?({pool, _dim}) do
-    Process.get({:taskweft_hrr_conn, pool}) != nil
-  end
-
-  # ---------------------------------------------------------------------------
-  # Transaction properties
-  # ---------------------------------------------------------------------------
-
-  property "committed insert is visible after transaction" do
+  property "insert is visible immediately" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
       with_storage(fn store ->
-        {:ok, :ok} = with_txn(store, fn store ->
-          Storage.insert(store, @source, id, fields)
-        end)
+        :ok = Storage.insert(store, @source, id, fields)
         Storage.get(store, @source, id) == fields
       end)
     end
   end
 
-  property "rolled-back insert is not visible" do
-    forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn {pool, _dim} = store ->
-        Postgrex.transaction(pool, fn conn ->
-          Process.put({:taskweft_hrr_conn, pool}, conn)
-          try do
-            Storage.insert(store, @source, id, fields)
-            # Postgrex.rollback signals rollback without raising, so
-            # Postgrex.transaction returns {:error, :rollback} cleanly.
-            Postgrex.rollback(conn, :rollback)
-          after
-            Process.delete({:taskweft_hrr_conn, pool})
-          end
-        end)
-        Storage.get(store, @source, id) == nil
-      end)
-    end
-  end
-
-  property "rolled-back delete preserves the record" do
-    forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn {pool, _dim} = store ->
-        :ok = Storage.insert(store, @source, id, fields)
-        Postgrex.transaction(pool, fn conn ->
-          Process.put({:taskweft_hrr_conn, pool}, conn)
-          try do
-            Storage.delete(store, @source, id)
-            Postgrex.rollback(conn, :rollback)
-          after
-            Process.delete({:taskweft_hrr_conn, pool})
-          end
-        end)
-        Storage.get(store, @source, id) == fields
-      end)
-    end
-  end
-
-  property "committed delete removes the record" do
+  property "delete removes the record" do
     forall {id, fields} <- {word_gen(), fields_gen()} do
       with_storage(fn store ->
         :ok = Storage.insert(store, @source, id, fields)
-        {:ok, :ok} = with_txn(store, fn store ->
-          Storage.delete(store, @source, id)
-        end)
+        :ok = Storage.delete(store, @source, id)
         Storage.get(store, @source, id) == nil
       end)
     end
   end
 
-  property "in_transaction? is false outside transaction" do
-    with_storage(fn store ->
-      not in_transaction?(store)
-    end)
-  end
-
-  property "in_transaction? is true inside transaction" do
-    with_storage(fn {pool, _dim} = store ->
-      result_ref = :atomics.new(1, [])
-      Postgrex.transaction(pool, fn conn ->
-        Process.put({:taskweft_hrr_conn, pool}, conn)
-        try do
-          :atomics.put(result_ref, 1, if(in_transaction?(store), do: 1, else: 0))
-        after
-          Process.delete({:taskweft_hrr_conn, pool})
-        end
-      end)
-      :atomics.get(result_ref, 1) == 1
-    end)
-  end
-
-  property "bundle reflects post-commit state" do
+  property "bundle exists after inserts" do
     forall records <- record_list_gen() do
       with_storage(fn store ->
-        {:ok, _} = with_txn(store, fn store ->
-          populate(store, records)
-        end)
+        populate(store, records)
         Storage.bundle(store, @source) != nil
       end)
     end
   end
 
-  property "bundle is nil after rollback of all inserts" do
-    forall {id, fields} <- {word_gen(), fields_gen()} do
-      with_storage(fn {pool, _dim} = store ->
-        Postgrex.transaction(pool, fn conn ->
-          Process.put({:taskweft_hrr_conn, pool}, conn)
-          try do
-            Storage.insert(store, @source, id, fields)
-            Postgrex.rollback(conn, :rollback)
-          after
-            Process.delete({:taskweft_hrr_conn, pool})
-          end
-        end)
-        Storage.bundle(store, @source) == nil
-      end)
-    end
+  property "bundle is nil on empty source" do
+    with_storage(fn store ->
+      Storage.bundle(store, "empty_#{:erlang.unique_integer([:positive])}") == nil
+    end)
   end
 
   # ---------------------------------------------------------------------------
@@ -235,12 +150,18 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   defp join_query(right_source, left_field, right_field) do
     join_expr = %{
-      qual:   :inner,
+      qual: :inner,
       source: {right_source, nil},
-      on:     %{expr: {:==, [],
-                  [{{:., [], [{:&, [], [0]}, String.to_atom(left_field)]}, [], []},
-                   {{:., [], [{:&, [], [1]}, String.to_atom(right_field)]}, [], []}]}}
+      on: %{
+        expr:
+          {:==, [],
+           [
+             {{:., [], [{:&, [], [0]}, String.to_atom(left_field)]}, [], []},
+             {{:., [], [{:&, [], [1]}, String.to_atom(right_field)]}, [], []}
+           ]}
+      }
     }
+
     %{base_query() | joins: [join_expr]}
   end
 
@@ -249,18 +170,17 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
       with_storage(fn store ->
         populate(store, records)
 
-        # Seed right source with matching item_name keys
         {_id, first_fields} = hd(records)
         key = Map.get(first_fields, "name")
         tag_id = "tag-#{:erlang.unique_integer([:positive])}"
         :ok = Storage.insert(store, @source_b, tag_id, %{"item_name" => key, "label" => "x"})
 
-        query  = join_query(@source_b, "name", "item_name")
+        query = join_query(@source_b, "name", "item_name")
         result = Query.execute(store, :all, query, [], [])
 
         Enum.all?(result, fn row ->
           is_list(row) and
-          Map.get(Enum.at(row, 0), "name") == Map.get(Enum.at(row, 1), "item_name")
+            Map.get(Enum.at(row, 0), "name") == Map.get(Enum.at(row, 1), "item_name")
         end)
       end)
     end
@@ -270,15 +190,14 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
     forall records <- record_list_gen() do
       with_storage(fn store ->
         populate(store, records)
-        # Right source is empty
-        query  = join_query("empty_source_#{:erlang.unique_integer()}", "name", "item_name")
+        query = join_query("empty_source_#{:erlang.unique_integer()}", "name", "item_name")
         result = Query.execute(store, :all, query, [], [])
         result == []
       end)
     end
   end
 
-  property "exact join row count = |left| × |matching_right| per left key" do
+  property "exact join row count = |left| times |matching_right| per left key" do
     forall records <- record_list_gen() do
       with_storage(fn store ->
         populate(store, records)
@@ -286,18 +205,16 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         {_id, first_fields} = hd(records)
         key = Map.get(first_fields, "name")
 
-        # Insert two matching right rows
         n1 = "t#{:erlang.unique_integer([:positive])}"
         n2 = "t#{:erlang.unique_integer([:positive])}"
         :ok = Storage.insert(store, @source_b, n1, %{"item_name" => key, "label" => "a"})
         :ok = Storage.insert(store, @source_b, n2, %{"item_name" => key, "label" => "b"})
 
-        # Count left rows with this key
         left_matching =
           Storage.all(store, @source)
           |> Enum.count(fn r -> Map.get(r, "name") == key end)
 
-        query  = join_query(@source_b, "name", "item_name")
+        query = join_query(@source_b, "name", "item_name")
         result = Query.execute(store, :all, query, [], [])
 
         length(result) == left_matching * 2
@@ -313,7 +230,7 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         key = Map.get(fields, "name")
         :ok = Storage.insert(store, @source_b, tag_id, %{"item_name" => key, "label" => "y"})
 
-        query  = join_query(@source_b, "name", "item_name")
+        query = join_query(@source_b, "name", "item_name")
         result = Query.execute(store, :all, query, [], [])
         Enum.all?(result, fn row -> is_list(row) and length(row) == 2 end)
       end)
@@ -326,12 +243,18 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
 
   defp semantic_join_query(right_source, left_field, right_field) do
     join_expr = %{
-      qual:   :inner,
+      qual: :inner,
       source: {right_source, nil},
-      on:     %{expr: {:like, [],
-                  [{{:., [], [{:&, [], [0]}, String.to_atom(left_field)]}, [], []},
-                   {{:., [], [{:&, [], [1]}, String.to_atom(right_field)]}, [], []}]}}
+      on: %{
+        expr:
+          {:like, [],
+           [
+             {{:., [], [{:&, [], [0]}, String.to_atom(left_field)]}, [], []},
+             {{:., [], [{:&, [], [1]}, String.to_atom(right_field)]}, [], []}
+           ]}
+      }
     }
+
     %{base_query() | joins: [join_expr]}
   end
 
@@ -342,8 +265,8 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         key = Map.get(fields, "name")
         :ok = Storage.insert(store, @source_b, "t1", %{"item_name" => key, "label" => "z"})
 
-        query  = semantic_join_query(@source_b, "name", "item_name")
-        result = Query.execute(store, :all, query, [], [hrr_threshold: -1.0])
+        query = semantic_join_query(@source_b, "name", "item_name")
+        result = Query.execute(store, :all, query, [], hrr_threshold: -1.0)
         Enum.all?(result, fn row -> is_list(row) and length(row) == 2 end)
       end)
     end
@@ -356,8 +279,8 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         key = Map.get(fields, "name")
         :ok = Storage.insert(store, @source_b, "t1", %{"item_name" => key, "label" => "z"})
 
-        query  = semantic_join_query(@source_b, "name", "item_name")
-        result = Query.execute(store, :all, query, [], [hrr_threshold: 1.1])
+        query = semantic_join_query(@source_b, "name", "item_name")
+        result = Query.execute(store, :all, query, [], hrr_threshold: 1.1)
         result == []
       end)
     end
@@ -367,23 +290,23 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
   # Aggregate properties
   # ---------------------------------------------------------------------------
 
-  property "count(*) without WHERE matches record_count in hrr_bundles" do
+  property "count(*) without WHERE matches record_count in bundles" do
     forall records <- record_list_gen() do
       with_storage(fn store ->
         populate(store, records)
-        query  = %{base_query() | select: agg_select(:count)}
-        [[n]]  = Query.execute(store, :all, query, [], [])
+        query = %{base_query() | select: agg_select(:count)}
+        [[n]] = Query.execute(store, :all, query, [], [])
         n == Storage.record_count(store, @source)
       end)
     end
   end
 
-  property "count(*) without WHERE does not scan hrr_records (fast path)" do
+  property "count(*) without WHERE equals number of distinct inserted ids" do
     forall records <- record_list_gen() do
       with_storage(fn store ->
         populate(store, records)
-        query  = %{base_query() | select: agg_select(:count)}
-        [[n]]  = Query.execute(store, :all, query, [], [])
+        query = %{base_query() | select: agg_select(:count)}
+        [[n]] = Query.execute(store, :all, query, [], [])
         n == length(records)
       end)
     end
@@ -396,12 +319,15 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         {_, first_fields} = hd(records)
         cat = Map.get(first_fields, "category")
 
-        q_count = %{base_query() |
-          wheres: [eq_where("category", 0)],
-          select: agg_select(:count, "name")}
+        q_count = %{
+          base_query()
+          | wheres: [eq_where("category", 0)],
+            select: agg_select(:count, "name")
+        }
+
         q_all = %{base_query() | wheres: [eq_where("category", 0)]}
 
-        [[n]]   = Query.execute(store, :all, q_count, [cat], [])
+        [[n]] = Query.execute(store, :all, q_count, [cat], [])
         all_cat = Query.execute(store, :all, q_all, [cat], [])
         n == length(all_cat)
       end)
@@ -412,9 +338,9 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
     forall records <- record_list_gen() do
       with_storage(fn store ->
         populate(store, records)
-        query  = %{base_query() | select: agg_select(:sum, "score")}
-        [[s]]  = Query.execute(store, :all, query, [], [])
-        all    = Storage.all(store, @source)
+        query = %{base_query() | select: agg_select(:sum, "score")}
+        [[s]] = Query.execute(store, :all, query, [], [])
+        all = Storage.all(store, @source)
         expected = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1) |> Enum.sum()
         abs(s - expected) < 1.0e-9
       end)
@@ -427,12 +353,13 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         populate(store, records)
         query = %{base_query() | select: agg_select(:avg, "score")}
         [[a]] = Query.execute(store, :all, query, [], [])
-        all   = Storage.all(store, @source)
-        vals  = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
+        all = Storage.all(store, @source)
+        vals = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
         expected = if vals == [], do: nil, else: Enum.sum(vals) / length(vals)
+
         case {a, expected} do
           {nil, nil} -> true
-          {v, e}     -> abs(v - e) < 1.0e-9
+          {v, e} -> abs(v - e) < 1.0e-9
         end
       end)
     end
@@ -444,8 +371,8 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         populate(store, records)
         query = %{base_query() | select: agg_select(:min, "score")}
         [[m]] = Query.execute(store, :all, query, [], [])
-        all   = Storage.all(store, @source)
-        vals  = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
+        all = Storage.all(store, @source)
+        vals = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
         m != nil and Enum.all?(vals, &(m <= &1))
       end)
     end
@@ -457,30 +384,9 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
         populate(store, records)
         query = %{base_query() | select: agg_select(:max, "score")}
         [[m]] = Query.execute(store, :all, query, [], [])
-        all   = Storage.all(store, @source)
-        vals  = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
+        all = Storage.all(store, @source)
+        vals = all |> Enum.map(&Map.get(&1, "score")) |> Enum.reject(&is_nil/1)
         m != nil and Enum.all?(vals, &(m >= &1))
-      end)
-    end
-  end
-
-  property "count(*) after rollback equals pre-transaction count" do
-    forall {records, id, fields} <- {record_list_gen(), word_gen(), fields_gen()} do
-      with_storage(fn {pool, _dim} = store ->
-        populate(store, records)
-        before_count = Storage.record_count(store, @source)
-
-        Postgrex.transaction(pool, fn conn ->
-          Process.put({:taskweft_hrr_conn, pool}, conn)
-          try do
-            Storage.insert(store, @source, id, fields)
-            Postgrex.rollback(conn, :rollback)
-          after
-            Process.delete({:taskweft_hrr_conn, pool})
-          end
-        end)
-
-        Storage.record_count(store, @source) == before_count
       end)
     end
   end
@@ -489,9 +395,9 @@ defmodule Taskweft.HRR.TxnJoinAggPropTest do
     with_storage(fn store ->
       src = "empty_#{:erlang.unique_integer([:positive])}"
       q_count = %{base_query(src) | select: agg_select(:count)}
-      q_min   = %{base_query(src) | select: agg_select(:min, "score")}
-      q_max   = %{base_query(src) | select: agg_select(:max, "score")}
-      q_avg   = %{base_query(src) | select: agg_select(:avg, "score")}
+      q_min = %{base_query(src) | select: agg_select(:min, "score")}
+      q_max = %{base_query(src) | select: agg_select(:max, "score")}
+      q_avg = %{base_query(src) | select: agg_select(:avg, "score")}
 
       [[c]] = Query.execute(store, :all, q_count, [], [])
       [[mn]] = Query.execute(store, :all, q_min, [], [])

@@ -8,7 +8,7 @@ defmodule Taskweft.GEPA.Critique do
   @llm_doc "A one-sentence critique of what went wrong in an episode and one concrete improvement."
   @primary_key false
   embedded_schema do
-    field :critique, :string
+    field(:critique, :string)
   end
 end
 
@@ -19,6 +19,6 @@ defmodule Taskweft.GEPA.EvolvedInstructions do
   @llm_doc "A revised list of bot instructions improved based on episode feedback."
   @primary_key false
   embedded_schema do
-    field :instructions, {:array, :string}
+    field(:instructions, {:array, :string})
   end
 end

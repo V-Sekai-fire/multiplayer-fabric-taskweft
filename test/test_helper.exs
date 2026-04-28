@@ -1,3 +1,3 @@
 Application.ensure_all_started(:propcheck)
 ExUnit.start()
-Code.require_file("support/db_helpers.ex", __DIR__)
+Mox.defmock(Taskweft.GEPA.InstructorMock, for: Instructor.Adapter)

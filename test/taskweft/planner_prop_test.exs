@@ -16,6 +16,7 @@ defmodule Taskweft.PlannerPropTest do
     forall fname <- domain_file_gen() do
       domain = File.read!(Path.join(@domains_dir, fname))
       result = Taskweft.plan(domain)
+
       match?({:ok, _}, result) or match?({:error, "no_plan"}, result) or
         match?({:error, _}, result)
     end
@@ -24,12 +25,14 @@ defmodule Taskweft.PlannerPropTest do
   property "plan: result is valid JSON array when ok" do
     forall fname <- domain_file_gen() do
       domain = File.read!(Path.join(@domains_dir, fname))
+
       case Taskweft.plan(domain) do
         {:ok, json} ->
           case Jason.decode(json) do
             {:ok, steps} -> is_list(steps)
             _ -> false
           end
+
         {:error, _} ->
           true
       end
@@ -39,10 +42,12 @@ defmodule Taskweft.PlannerPropTest do
   property "plan: each step is a non-empty array" do
     forall fname <- domain_file_gen() do
       domain = File.read!(Path.join(@domains_dir, fname))
+
       case Taskweft.plan(domain) do
         {:ok, json} ->
           {:ok, steps} = Jason.decode(json)
           Enum.all?(steps, &(is_list(&1) and length(&1) >= 1))
+
         {:error, _} ->
           true
       end
@@ -54,15 +59,18 @@ defmodule Taskweft.PlannerPropTest do
   property "replan: result JSON has required keys when ok" do
     forall fname <- domain_file_gen() do
       domain = File.read!(Path.join(@domains_dir, fname))
+
       case Taskweft.plan(domain) do
         {:ok, plan_json} ->
           case Taskweft.replan(domain, plan_json, -1) do
             {:ok, json} ->
               {:ok, result} = Jason.decode(json)
               Map.has_key?(result, "recovered") and Map.has_key?(result, "fail_step")
+
             {:error, _} ->
               true
           end
+
         {:error, _} ->
           true
       end
@@ -82,10 +90,12 @@ defmodule Taskweft.PlannerPropTest do
   property "check_temporal: returns ok or error — never crashes" do
     forall fname <- domain_file_gen() do
       domain = File.read!(Path.join(@domains_dir, fname))
+
       case Taskweft.plan(domain) do
         {:ok, plan_json} ->
           result = Taskweft.check_temporal(domain, plan_json, "PT0S")
           match?({:ok, _}, result) or match?({:error, _}, result)
+
         {:error, _} ->
           true
       end
@@ -95,6 +105,7 @@ defmodule Taskweft.PlannerPropTest do
   property "check_temporal: result has consistent field" do
     forall fname <- domain_file_gen() do
       domain = File.read!(Path.join(@domains_dir, fname))
+
       case Taskweft.plan(domain) do
         {:ok, plan_json} ->
           case Taskweft.check_temporal(domain, plan_json) do
@@ -103,9 +114,11 @@ defmodule Taskweft.PlannerPropTest do
               # result is {"plan": ..., "temporal": {"consistent": ...}}
               temporal = result["temporal"] || result
               Map.has_key?(temporal, "consistent")
+
             {:error, _} ->
               true
           end
+
         {:error, _} ->
           true
       end

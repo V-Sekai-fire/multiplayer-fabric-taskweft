@@ -265,6 +265,7 @@ defmodule Taskweft.RECTGTNPropTest do
         {:ok, json} ->
           steps = Jason.decode!(json)
           Enum.all?(steps, fn [_name, agent | _] -> agent in ["robot_a", "robot_b"] end)
+
         {:error, _} ->
           true
       end
@@ -275,7 +276,9 @@ defmodule Taskweft.RECTGTNPropTest do
   # C — Capabilities
   # ---------------------------------------------------------------------------
 
-  @caps_domain File.read!(Path.join([__DIR__, "../../priv/plans/domains/entity_capabilities.jsonld"]))
+  @caps_domain File.read!(
+                 Path.join([__DIR__, "../../priv/plans/domains/entity_capabilities.jsonld"])
+               )
 
   test "C: drone (fly capability) plan uses only a_fly" do
     domain =
