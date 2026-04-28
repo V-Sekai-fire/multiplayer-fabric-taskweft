@@ -57,10 +57,19 @@ defmodule Taskweft.KHRInteractivityPropTest do
   end
 
   # Assert the domain produces a successful plan.
-  defp assert_plans(domain), do: assert plans?(domain)
+  defp assert_plans(domain), do: assert(plans?(domain))
 
   # Assert the domain fails to plan (expression evaluated to false/wrong).
-  defp refute_plans(domain), do: refute plans?(domain)
+  defp refute_plans(domain), do: refute(plans?(domain))
+
+  # Interval check: |expr - expected| <= eps, expressed as KHR nodes.
+  # Use for transcendental ops that are not required to be correctly rounded.
+  defp near_eq(expr, expected, eps \\ 1.0e-9) do
+    khr("math/le", %{
+      "a" => khr("math/abs", %{"a" => khr("math/sub", %{"a" => expr, "b" => expected})}),
+      "b" => eps
+    })
+  end
 
   # ---------------------------------------------------------------------------
   # §02 Constants: math/E, math/Pi, math/Inf, math/NaN
@@ -122,7 +131,9 @@ defmodule Taskweft.KHRInteractivityPropTest do
 
   test "math/div: 12 / 4 = 3" do
     assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/div", %{"a" => 12.0, "b" => 4.0}), "b" => 3.0}))
+      eval_domain(
+        khr("math/eq", %{"a" => khr("math/div", %{"a" => 12.0, "b" => 4.0}), "b" => 3.0})
+      )
     )
   end
 
@@ -141,30 +152,22 @@ defmodule Taskweft.KHRInteractivityPropTest do
 
   test "math/fract: fract(2.75) = 0.75" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/fract", %{"a" => 2.75}), "b" => 0.75})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("math/fract", %{"a" => 2.75}), "b" => 0.75}))
     )
   end
 
   test "math/fract: fract(-1.25) = 0.75" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/fract", %{"a" => -1.25}), "b" => 0.75})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("math/fract", %{"a" => -1.25}), "b" => 0.75}))
     )
   end
 
   test "math/neg: neg(-5) = 5" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/neg", %{"a" => -5}), "b" => 5}))
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/neg", %{"a" => -5}), "b" => 5})))
   end
 
   test "math/abs: abs(-3) = 3" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/abs", %{"a" => -3}), "b" => 3}))
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/abs", %{"a" => -3}), "b" => 3})))
   end
 
   test "math/min: min(3, 5) = 3" do
@@ -181,25 +184,19 @@ defmodule Taskweft.KHRInteractivityPropTest do
 
   test "math/saturate: saturate(1.5) = 1.0" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/saturate", %{"a" => 1.5}), "b" => 1.0})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("math/saturate", %{"a" => 1.5}), "b" => 1.0}))
     )
   end
 
   test "math/saturate: saturate(-0.5) = 0.0" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/saturate", %{"a" => -0.5}), "b" => 0.0})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("math/saturate", %{"a" => -0.5}), "b" => 0.0}))
     )
   end
 
   test "math/saturate: saturate(0.5) = 0.5" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/saturate", %{"a" => 0.5}), "b" => 0.5})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("math/saturate", %{"a" => 0.5}), "b" => 0.5}))
     )
   end
 
@@ -279,47 +276,31 @@ defmodule Taskweft.KHRInteractivityPropTest do
   # ---------------------------------------------------------------------------
 
   test "math/sqrt: sqrt(9.0) = 3.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/sqrt", %{"a" => 9.0}), "b" => 3.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/sqrt", %{"a" => 9.0}), 3.0)))
   end
 
   test "math/cbrt: cbrt(27.0) = 3.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/cbrt", %{"a" => 27.0}), "b" => 3.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/cbrt", %{"a" => 27.0}), 3.0)))
   end
 
   test "math/exp: exp(0.0) = 1.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/exp", %{"a" => 0.0}), "b" => 1.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/exp", %{"a" => 0.0}), 1.0)))
   end
 
   test "math/log: log(1.0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/log", %{"a" => 1.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/log", %{"a" => 1.0}), 0.0)))
   end
 
   test "math/log2: log2(8.0) = 3.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/log2", %{"a" => 8.0}), "b" => 3.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/log2", %{"a" => 8.0}), 3.0)))
   end
 
   test "math/log10: log10(100.0) = 2.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/log10", %{"a" => 100.0}), "b" => 2.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/log10", %{"a" => 100.0}), 2.0)))
   end
 
   test "math/pow: pow(2.0, 10.0) = 1024.0" do
-    assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/pow", %{"a" => 2.0, "b" => 10.0}), "b" => 1024.0})
-      )
-    )
+    assert_plans(eval_domain(near_eq(khr("math/pow", %{"a" => 2.0, "b" => 10.0}), 1024.0)))
   end
 
   # ---------------------------------------------------------------------------
@@ -491,15 +472,11 @@ defmodule Taskweft.KHRInteractivityPropTest do
 
   test "math/random: result is in [0, 1)" do
     # random ∈ [0,1) → random < 1.0
-    assert_plans(
-      eval_domain(khr("math/lt", %{"a" => khr("math/random"), "b" => 1.0}))
-    )
+    assert_plans(eval_domain(khr("math/lt", %{"a" => khr("math/random"), "b" => 1.0})))
   end
 
   test "math/random: result is >= 0.0" do
-    assert_plans(
-      eval_domain(khr("math/ge", %{"a" => khr("math/random"), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(khr("math/ge", %{"a" => khr("math/random"), "b" => 0.0})))
   end
 
   # ---------------------------------------------------------------------------
@@ -507,47 +484,31 @@ defmodule Taskweft.KHRInteractivityPropTest do
   # ---------------------------------------------------------------------------
 
   test "math/sin: sin(0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/sin", %{"a" => 0.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/sin", %{"a" => 0.0}), 0.0)))
   end
 
   test "math/cos: cos(0) = 1.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/cos", %{"a" => 0.0}), "b" => 1.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/cos", %{"a" => 0.0}), 1.0)))
   end
 
   test "math/tan: tan(0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/tan", %{"a" => 0.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/tan", %{"a" => 0.0}), 0.0)))
   end
 
   test "math/asin: asin(0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/asin", %{"a" => 0.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/asin", %{"a" => 0.0}), 0.0)))
   end
 
   test "math/acos: acos(1.0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/acos", %{"a" => 1.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/acos", %{"a" => 1.0}), 0.0)))
   end
 
   test "math/atan: atan(0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/atan", %{"a" => 0.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/atan", %{"a" => 0.0}), 0.0)))
   end
 
   test "math/atan2: atan2(0, 1) = 0.0" do
-    assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/atan2", %{"a" => 0.0, "b" => 1.0}), "b" => 0.0})
-      )
-    )
+    assert_plans(eval_domain(near_eq(khr("math/atan2", %{"a" => 0.0, "b" => 1.0}), 0.0)))
   end
 
   # sin²(x) + cos²(x) = 1 — property test with arbitrary angles.
@@ -560,19 +521,11 @@ defmodule Taskweft.KHRInteractivityPropTest do
   end
 
   test "math/deg: deg(Pi) = 180.0" do
-    assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/deg", %{"a" => khr("math/Pi")}), "b" => 180.0})
-      )
-    )
+    assert_plans(eval_domain(near_eq(khr("math/deg", %{"a" => khr("math/Pi")}), 180.0)))
   end
 
   test "math/rad: rad(180.0) = Pi" do
-    assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/rad", %{"a" => 180.0}), "b" => khr("math/Pi")})
-      )
-    )
+    assert_plans(eval_domain(near_eq(khr("math/rad", %{"a" => 180.0}), khr("math/Pi"))))
   end
 
   # ---------------------------------------------------------------------------
@@ -580,39 +533,27 @@ defmodule Taskweft.KHRInteractivityPropTest do
   # ---------------------------------------------------------------------------
 
   test "math/sinh: sinh(0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/sinh", %{"a" => 0.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/sinh", %{"a" => 0.0}), 0.0)))
   end
 
   test "math/cosh: cosh(0) = 1.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/cosh", %{"a" => 0.0}), "b" => 1.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/cosh", %{"a" => 0.0}), 1.0)))
   end
 
   test "math/tanh: tanh(0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/tanh", %{"a" => 0.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/tanh", %{"a" => 0.0}), 0.0)))
   end
 
   test "math/asinh: asinh(0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/asinh", %{"a" => 0.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/asinh", %{"a" => 0.0}), 0.0)))
   end
 
   test "math/acosh: acosh(1.0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/acosh", %{"a" => 1.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/acosh", %{"a" => 1.0}), 0.0)))
   end
 
   test "math/atanh: atanh(0) = 0.0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/atanh", %{"a" => 0.0}), "b" => 0.0}))
-    )
+    assert_plans(eval_domain(near_eq(khr("math/atanh", %{"a" => 0.0}), 0.0)))
   end
 
   # ---------------------------------------------------------------------------
@@ -626,9 +567,7 @@ defmodule Taskweft.KHRInteractivityPropTest do
   end
 
   test "math/not (int): ~0 = -1 (two's complement 32-bit)" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/not", %{"a" => 0}), "b" => -1}))
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/not", %{"a" => 0}), "b" => -1})))
   end
 
   test "math/asr: 8 >> 1 = 4" do
@@ -639,9 +578,7 @@ defmodule Taskweft.KHRInteractivityPropTest do
 
   test "math/asr: -8 >> 1 = -4 (sign-extending)" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/asr", %{"a" => -8, "b" => 1}), "b" => -4})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("math/asr", %{"a" => -8, "b" => 1}), "b" => -4}))
     )
   end
 
@@ -652,41 +589,27 @@ defmodule Taskweft.KHRInteractivityPropTest do
   end
 
   test "math/clz: clz(0) = 32" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/clz", %{"a" => 0}), "b" => 32}))
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/clz", %{"a" => 0}), "b" => 32})))
   end
 
   test "math/clz: clz(1) = 31" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/clz", %{"a" => 1}), "b" => 31}))
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/clz", %{"a" => 1}), "b" => 31})))
   end
 
   test "math/ctz: ctz(0) = 32" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/ctz", %{"a" => 0}), "b" => 32}))
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/ctz", %{"a" => 0}), "b" => 32})))
   end
 
   test "math/ctz: ctz(8) = 3" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/ctz", %{"a" => 8}), "b" => 3}))
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/ctz", %{"a" => 8}), "b" => 3})))
   end
 
   test "math/popcnt: popcnt(7) = 3" do
-    assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/popcnt", %{"a" => 7}), "b" => 3})
-      )
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/popcnt", %{"a" => 7}), "b" => 3})))
   end
 
   test "math/popcnt: popcnt(0) = 0" do
-    assert_plans(
-      eval_domain(khr("math/eq", %{"a" => khr("math/popcnt", %{"a" => 0}), "b" => 0}))
-    )
+    assert_plans(eval_domain(khr("math/eq", %{"a" => khr("math/popcnt", %{"a" => 0}), "b" => 0})))
   end
 
   # ---------------------------------------------------------------------------
@@ -695,25 +618,19 @@ defmodule Taskweft.KHRInteractivityPropTest do
 
   test "type/boolToInt: true → 1" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("type/boolToInt", %{"a" => true}), "b" => 1})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("type/boolToInt", %{"a" => true}), "b" => 1}))
     )
   end
 
   test "type/boolToInt: false → 0" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("type/boolToInt", %{"a" => false}), "b" => 0})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("type/boolToInt", %{"a" => false}), "b" => 0}))
     )
   end
 
   test "type/boolToFloat: true → 1.0" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("type/boolToFloat", %{"a" => true}), "b" => 1.0})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("type/boolToFloat", %{"a" => true}), "b" => 1.0}))
     )
   end
 
@@ -727,17 +644,13 @@ defmodule Taskweft.KHRInteractivityPropTest do
 
   test "type/intToFloat: 5 → 5.0" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("type/intToFloat", %{"a" => 5}), "b" => 5.0})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("type/intToFloat", %{"a" => 5}), "b" => 5.0}))
     )
   end
 
   test "type/floatToInt: 3.9 → 3 (truncate)" do
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("type/floatToInt", %{"a" => 3.9}), "b" => 3})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("type/floatToInt", %{"a" => 3.9}), "b" => 3}))
     )
   end
 
@@ -802,9 +715,7 @@ defmodule Taskweft.KHRInteractivityPropTest do
     v = khr("math/combine2", %{"a" => 3.0, "b" => 4.0})
 
     assert_plans(
-      eval_domain(
-        khr("math/eq", %{"a" => khr("math/dot", %{"a" => v, "b" => v}), "b" => 25.0})
-      )
+      eval_domain(khr("math/eq", %{"a" => khr("math/dot", %{"a" => v, "b" => v}), "b" => 25.0}))
     )
   end
 
@@ -814,8 +725,7 @@ defmodule Taskweft.KHRInteractivityPropTest do
     assert_plans(
       eval_domain(
         khr("math/eq", %{
-          "a" =>
-            khr("math/length", %{"a" => khr("math/normalize", %{"a" => v})}),
+          "a" => khr("math/length", %{"a" => khr("math/normalize", %{"a" => v})}),
           "b" => 1.0
         })
       )

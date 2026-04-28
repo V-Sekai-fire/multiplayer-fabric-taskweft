@@ -1,18 +1,17 @@
 defmodule Taskweft.HRR.Adapter do
   @moduledoc """
-  Ecto adapter backed by Holographic Reduced Representations, persisted to PostgreSQL
-  (CockroachDB-compatible).
+  Ecto adapter backed by Holographic Reduced Representations, persisted to DETS.
 
   ## What HRR replaces SQL with
 
   | SQL concept           | HRR operation                                                     |
   |-----------------------|-------------------------------------------------------------------|
-  | Table                 | Per-source bundle (superposition of record vectors in PostgreSQL) |
-  | INSERT                | `bundle(table_mem, bind(role(field), encode(value)))`             |
-  | DELETE                | Remove record vector, rebuild bundle                              |
-  | WHERE field = value   | exact in-memory equality after full scan                          |
+  | Table                 | Per-source bundle (superposition of record vectors in DETS)       |
+  | INSERT                | `bundle(table, bind(role(field), encode(value)))`                 |
+  | DELETE                | Remove record, rebuild bundle                                     |
+  | WHERE field = value   | Exact in-memory equality after full scan                          |
   | WHERE LIKE %query%    | `probe_field` → cosine-rank by `encode(stripped_pattern)`         |
-  | SELECT *              | Return deserialized JSON rows from PostgreSQL                     |
+  | SELECT *              | Deserialized field maps from DETS                                 |
   | UPDATE                | DELETE + INSERT                                                   |
 
   ## Repo configuration
@@ -20,25 +19,23 @@ defmodule Taskweft.HRR.Adapter do
       config :my_app, MyApp.Repo,
         adapter: Taskweft.HRR.Adapter,
         hrr_dim: 1024,                    # vector dimension (default 1024)
-        name: MyApp.HRRPool,              # Postgrex pool name
-        url: "postgresql://...",          # database URL (default DATABASE_URL env var)
-        pool_size: 10                     # connection pool size (default 10)
+        name: MyApp.HRRPool,              # DETS table name
+        dets_path: "/var/data/hrr.dets"   # file path (default: System.tmp_dir!/hrr_<name>.dets)
 
   ## Caveats
 
-  * Records are persisted in PostgreSQL as JSON; vectors are stored as BYTEA columns.
+  * Records are persisted in DETS as Erlang terms; vectors as binaries.
   * `LIKE` / `ILIKE` use HRR cosine similarity (`probe_field`) rather than
     string pattern matching.  Pass `:hrr_threshold` in query opts to tune
     the minimum similarity score (default `0.1`).
   * Queries beyond `==`, `!=`, `like`, and `ilike` fall back to in-memory
     linear scan.
+  * DETS does not support ACID transactions; `transaction/3` calls `fun.()`
+    directly and `rollback/2` raises `Ecto.Rollback`.
   * Transactions, inner joins (exact and HRR semantic), and common aggregates are supported.
   * LEFT JOIN is silently treated as INNER JOIN.
   """
 
-  # Register behaviours only when Ecto is compiled into the load path.
-  # This lets taskweft compile standalone while still satisfying the
-  # Ecto.Adapter contract in downstream projects that depend on both.
   if Code.ensure_loaded?(Ecto.Adapter) do
     @behaviour Ecto.Adapter
   end
@@ -66,16 +63,19 @@ defmodule Taskweft.HRR.Adapter do
   def ensure_all_started(_config, _type), do: {:ok, []}
 
   def init(config) do
-    dim       = Keyword.get(config, :hrr_dim, 1024)
-    url       = Keyword.get(config, :url, System.get_env("DATABASE_URL"))
-    pool_size = Keyword.get(config, :pool_size, 10)
-    pool_name = Keyword.get(config, :name, Taskweft.HRR.Pool)
+    dim = Keyword.get(config, :hrr_dim, 1024)
+    name = Keyword.get(config, :name, Taskweft.HRR.Pool)
+    path = Keyword.get(config, :dets_path, Path.join(System.tmp_dir!(), "hrr_#{name}.dets"))
 
-    pool_opts = [name: pool_name, url: url, pool_size: pool_size,
-                 after_connect: {Storage, :ensure_schema_on_connect!, []}]
+    child_spec = %{
+      id: name,
+      start: {Taskweft.HRR.TableServer, :start_link, [[name: name, path: path]]},
+      type: :worker,
+      restart: :permanent
+    }
 
-    meta = %{adapter: __MODULE__, store: {pool_name, dim}}
-    {:ok, Postgrex.child_spec(pool_opts), meta}
+    meta = %{adapter: __MODULE__, store: {name, dim}}
+    {:ok, child_spec, meta}
   end
 
   def checkout(_meta, _config, fun), do: fun.()
@@ -92,15 +92,15 @@ defmodule Taskweft.HRR.Adapter do
   # Ecto.Adapter.Schema callbacks
   # ---------------------------------------------------------------------------
 
-  def autogenerate(:id),        do: nil
-  def autogenerate(:embed_id),  do: generate_uuid()
+  def autogenerate(:id), do: nil
+  def autogenerate(:embed_id), do: generate_uuid()
   def autogenerate(:binary_id), do: generate_uuid()
 
   def insert(meta, schema_meta, fields, _on_conflict, returning, _opts) do
     %{store: store} = meta
     source = schema_meta.source
 
-    id         = resolve_id(fields)
+    id = resolve_id(fields)
     fields_map = fields_to_string_map(fields)
 
     :ok = Storage.insert(store, source, id, fields_map)
@@ -110,34 +110,24 @@ defmodule Taskweft.HRR.Adapter do
   end
 
   def insert_all(meta, schema_meta, _header, rows, _on_conflict, _returning, _placeholders, _opts) do
-    %{store: {pool, _dim} = store} = meta
+    %{store: store} = meta
     source = schema_meta.source
 
-    result =
-      Postgrex.transaction(pool, fn conn ->
-        Process.put({:taskweft_hrr_conn, pool}, conn)
-        try do
-          Enum.reduce(rows, 0, fn fields, acc ->
-            id         = resolve_id(fields)
-            fields_map = fields_to_string_map(fields)
-            :ok = Storage.insert(store, source, id, fields_map)
-            acc + 1
-          end)
-        after
-          Process.delete({:taskweft_hrr_conn, pool})
-        end
+    count =
+      Enum.reduce(rows, 0, fn fields, acc ->
+        id = resolve_id(fields)
+        fields_map = fields_to_string_map(fields)
+        :ok = Storage.insert(store, source, id, fields_map)
+        acc + 1
       end)
 
-    case result do
-      {:ok, count} -> {count, nil}
-      {:error, err} -> raise err
-    end
+    {count, nil}
   end
 
   def update(meta, schema_meta, fields, filters, returning, _opts) do
-    %{store: {pool, _dim} = store} = meta
+    %{store: store} = meta
     source = schema_meta.source
-    id     = Keyword.get(filters, :id) || Keyword.get(filters, :binary_id)
+    id = Keyword.get(filters, :id) || Keyword.get(filters, :binary_id)
 
     case Storage.get(store, source, id) do
       nil ->
@@ -145,18 +135,9 @@ defmodule Taskweft.HRR.Adapter do
 
       existing ->
         updates = fields_to_string_map(fields)
-        merged  = Map.merge(existing, updates)
-
-        Postgrex.transaction(pool, fn conn ->
-          Process.put({:taskweft_hrr_conn, pool}, conn)
-          try do
-            :ok = Storage.delete(store, source, id)
-            :ok = Storage.insert(store, source, id, merged)
-          after
-            Process.delete({:taskweft_hrr_conn, pool})
-          end
-        end)
-
+        merged = Map.merge(existing, updates)
+        :ok = Storage.delete(store, source, id)
+        :ok = Storage.insert(store, source, id, merged)
         returning_vals = Enum.map(returning, fn f -> {f, Map.get(merged, to_string(f))} end)
         {:ok, returning_vals}
     end
@@ -165,10 +146,12 @@ defmodule Taskweft.HRR.Adapter do
   def delete(meta, schema_meta, filters, _returning, _opts) do
     %{store: store} = meta
     source = schema_meta.source
-    id     = Keyword.get(filters, :id) || Keyword.get(filters, :binary_id)
+    id = Keyword.get(filters, :id) || Keyword.get(filters, :binary_id)
 
     case Storage.get(store, source, id) do
-      nil    -> {:error, :stale}
+      nil ->
+        {:error, :stale}
+
       _entry ->
         :ok = Storage.delete(store, source, id)
         {:ok, []}
@@ -197,7 +180,7 @@ defmodule Taskweft.HRR.Adapter do
     Stream.resource(
       fn -> Query.execute(store, :all, query, params, opts) end,
       fn
-        []           -> {:halt, []}
+        [] -> {:halt, []}
         [row | rest] -> {[row_to_list(row, query)], rest}
       end,
       fn _ -> :ok end
@@ -210,29 +193,19 @@ defmodule Taskweft.HRR.Adapter do
 
   # ---------------------------------------------------------------------------
   # Ecto.Adapter.Transaction callbacks
+  # DETS has no ACID transactions; we execute fun directly.
   # ---------------------------------------------------------------------------
 
-  def transaction(%{store: {pool, _dim}}, _opts, fun) do
-    Postgrex.transaction(pool, fn conn ->
-      Process.put({:taskweft_hrr_conn, pool}, conn)
-      try do
-        fun.()
-      catch
-        :throw, {:ecto_rollback, value} -> throw({:ecto_rollback, value})
-      after
-        Process.delete({:taskweft_hrr_conn, pool})
-      end
-    end)
-    |> case do
-      {:ok, result}  -> {:ok, result}
-      {:error, err}  -> {:error, err}
+  def transaction(_meta, _opts, fun) do
+    try do
+      {:ok, fun.()}
+    catch
+      :throw, {:ecto_rollback, value} -> {:error, value}
     end
   end
 
-  def in_transaction?(%{store: {pool, _dim}}),
-    do: Process.get({:taskweft_hrr_conn, pool}) != nil
+  def in_transaction?(_meta), do: false
 
-  # rollback/2 signals transaction/3 via throw; Postgrex.transaction catches it.
   def rollback(_meta, value), do: throw({:ecto_rollback, value})
 
   # ---------------------------------------------------------------------------
@@ -249,7 +222,6 @@ defmodule Taskweft.HRR.Adapter do
       generate_uuid()
   end
 
-  # Crypto-based UUID v4 that works with or without Ecto loaded.
   defp generate_uuid do
     if Code.ensure_loaded?(Ecto.UUID) do
       apply(Ecto.UUID, :generate, [])
@@ -260,9 +232,6 @@ defmodule Taskweft.HRR.Adapter do
     end
   end
 
-  # Build a flat list of field values in select order.
-  # row is either a plain map (no joins) or a list of maps indexed by binding.
-  # Falls back to the raw row for unrecognised select expressions.
   defp row_to_list(row, %{select: %{expr: {:&, [], [idx]}}}) do
     binding(row, idx)
   end
@@ -279,7 +248,6 @@ defmodule Taskweft.HRR.Adapter do
 
   defp row_to_list(row, _query), do: row
 
-  # Resolve a binding index from a row.  A plain map is always binding 0.
   defp binding(row, 0) when is_map(row), do: row
   defp binding(rows, idx) when is_list(rows), do: Enum.at(rows, idx, %{})
   defp binding(_row, _idx), do: %{}

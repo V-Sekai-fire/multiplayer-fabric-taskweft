@@ -7,19 +7,20 @@ defmodule Taskweft.HRR.StoragePropTest do
   alias Taskweft.HRR.Storage
 
   @dim 64
-  @pool :hrr_storage_prop_pool
-
-  # ---------------------------------------------------------------------------
-  # Module-level pool — started once, reused across all forall iterations.
-  # Opening a fresh TLS connection per iteration causes timeout during
-  # PropCheck's rapid shrinking phase; a single persistent pool avoids that.
-  # ---------------------------------------------------------------------------
+  @table :hrr_storage_prop_table
 
   setup_all do
-    {:ok, _} = Taskweft.Test.DBHelpers.start_pool(@pool)
-    Storage.ensure_schema!(@pool)
-    on_exit(fn -> GenServer.stop(@pool) end)
-    :ok
+    path =
+      Path.join(System.tmp_dir!(), "hrr_prop_test_#{:erlang.unique_integer([:positive])}.dets")
+
+    {:ok, _} = Storage.open_table(@table, path)
+
+    on_exit(fn ->
+      Storage.close_table(@table)
+      File.rm(path)
+    end)
+
+    %{path: path}
   end
 
   # ---------------------------------------------------------------------------
@@ -29,7 +30,7 @@ defmodule Taskweft.HRR.StoragePropTest do
   def source_gen, do: oneof(["users", "tasks", "items", "nodes"])
 
   def id_gen do
-    let n <- pos_integer(), do: "id-#{n}"
+    let(n <- pos_integer(), do: "id-#{n}")
   end
 
   def field_name_gen do
@@ -37,8 +38,10 @@ defmodule Taskweft.HRR.StoragePropTest do
   end
 
   def field_value_gen do
-    let chars <- non_empty(list(oneof([range(?a, ?z), range(?A, ?Z)]))),
+    let(
+      chars <- non_empty(list(oneof([range(?a, ?z), range(?A, ?Z)]))),
       do: to_string(chars)
+    )
   end
 
   def fields_gen do
@@ -58,14 +61,13 @@ defmodule Taskweft.HRR.StoragePropTest do
   # ---------------------------------------------------------------------------
 
   defp with_storage(fun) do
-    Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
-    Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
-    store = {@pool, @dim}
+    :dets.delete_all_objects(@table)
+    store = {@table, @dim}
+
     try do
       fun.(store)
     after
-      Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
-      Postgrex.query!(@pool, "DELETE FROM hrr_bundles", [])
+      :dets.delete_all_objects(@table)
     end
   end
 
@@ -179,8 +181,9 @@ defmodule Taskweft.HRR.StoragePropTest do
         :ok = Storage.delete(store, source, del_id)
 
         all = Storage.all(store, source)
-        not Enum.any?(all, fn _r -> Storage.get(store, source, del_id) != nil end)
-        and length(all) == length(records) - 1
+
+        not Enum.any?(all, fn _r -> Storage.get(store, source, del_id) != nil end) and
+          length(all) == length(records) - 1
       end)
     end
   end
@@ -219,7 +222,7 @@ defmodule Taskweft.HRR.StoragePropTest do
 
         Enum.all?(results, fn
           {sim, map} -> is_float(sim) and is_map(map)
-          _          -> false
+          _ -> false
         end)
       end)
     end
@@ -273,7 +276,7 @@ defmodule Taskweft.HRR.StoragePropTest do
           :ok = Storage.insert(store, source, id, fields)
         end)
 
-        limit   = max(1, div(length(records), 2))
+        limit = max(1, div(length(records), 2))
         results = Storage.probe_field(store, source, "name", "x", limit: limit, threshold: -1.0)
         length(results) <= limit
       end)
@@ -300,7 +303,7 @@ defmodule Taskweft.HRR.StoragePropTest do
 
         Enum.all?(results, fn
           {sim, map} -> is_float(sim) and is_map(map)
-          _          -> false
+          _ -> false
         end)
       end)
     end
@@ -314,7 +317,7 @@ defmodule Taskweft.HRR.StoragePropTest do
         end)
 
         results = Storage.probe_text(store, source, "alice", threshold: -1.0)
-        sims    = Enum.map(results, fn {sim, _} -> sim end)
+        sims = Enum.map(results, fn {sim, _} -> sim end)
         sims == Enum.sort(sims, :desc)
       end)
     end
@@ -328,7 +331,7 @@ defmodule Taskweft.HRR.StoragePropTest do
         end)
 
         threshold = 0.5
-        results   = Storage.probe_text(store, source, "alpha", threshold: threshold)
+        results = Storage.probe_text(store, source, "alpha", threshold: threshold)
         Enum.all?(results, fn {sim, _} -> sim >= threshold end)
       end)
     end
@@ -338,19 +341,16 @@ defmodule Taskweft.HRR.StoragePropTest do
   # HRR record vector integrity
   # ---------------------------------------------------------------------------
 
-  property "record_vector bytes are dim * 8 length when non-nil" do
+  property "record_vector bytes are non-NaN when non-nil" do
     forall {source, id, fields} <- {source_gen(), id_gen(), fields_gen()} do
       with_storage(fn store ->
         :ok = Storage.insert(store, source, id, fields)
-
-        # Probe yields valid similarity → vector was stored and is the right size.
-        # We check via probe_field returning a finite float.
         field = hd(Map.keys(fields))
-        val   = Map.get(fields, field)
+        val = Map.get(fields, field)
         results = Storage.probe_field(store, source, field, val, threshold: -1.0)
 
         Enum.all?(results, fn {sim, _} ->
-          is_float(sim) and not (sim != sim)  # not NaN
+          is_float(sim) and not (sim != sim)
         end)
       end)
     end
@@ -360,41 +360,37 @@ defmodule Taskweft.HRR.StoragePropTest do
     forall {source, id, fields} <- {source_gen(), id_gen(), fields_gen()} do
       with_storage(fn store ->
         :ok = Storage.insert(store, source, id, fields)
-
-        # Probing with the actual field value should return similarity > 0
-        # (HRR encode(x) vs unbind(bind(role, encode(x)), role) ≈ encode(x))
         field = hd(Map.keys(fields))
-        val   = Map.get(fields, field)
+        val = Map.get(fields, field)
         results = Storage.probe_field(store, source, field, val, threshold: -1.0)
 
         case Enum.find(results, fn {_, m} -> m == fields end) do
           {sim, _} -> sim >= 0.0
-          nil      -> false
+          nil -> false
         end
       end)
     end
   end
 
   # ---------------------------------------------------------------------------
-  # Persistence across pool restart (data survives in CockroachDB)
+  # Persistence across table close/reopen
   # ---------------------------------------------------------------------------
 
-  property "records survive pool restart" do
+  property "records survive table close and reopen" do
     forall {source, id, fields} <- {source_gen(), id_gen(), fields_gen()} do
-      # This property specifically tests persistence across pool restart,
-      # so it needs its own temporary pool that it can stop and restart.
-      # Use the module pool as the "second" connection to avoid TLS setup overhead.
-      Postgrex.query!(@pool, "DELETE FROM hrr_records", [])
-      store1 = {@pool, @dim}
-      :ok = Storage.insert(store1, source, id, fields)
-
-      # Simulate pool restart: stop and restart a temp pool, then read back.
       tmp = :"hrr_persist_#{:erlang.unique_integer([:positive])}"
-      {:ok, _} = Taskweft.Test.DBHelpers.start_pool(tmp)
-      store2 = {tmp, @dim}
-      result = Storage.get(store2, source, id)
-      Storage.delete(store2, source, id)
-      GenServer.stop(tmp)
+
+      path =
+        Path.join(System.tmp_dir!(), "hrr_persist_#{:erlang.unique_integer([:positive])}.dets")
+
+      {:ok, _} = Storage.open_table(tmp, path)
+      :ok = Storage.insert({tmp, @dim}, source, id, fields)
+      Storage.close_table(tmp)
+
+      {:ok, _} = Storage.open_table(tmp, path)
+      result = Storage.get({tmp, @dim}, source, id)
+      Storage.close_table(tmp)
+      File.rm(path)
 
       result == fields
     end

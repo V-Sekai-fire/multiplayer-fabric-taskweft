@@ -16,7 +16,8 @@ defmodule Taskweft.GEPA.ASI do
 
     asi = %{
       "failed_action" => Map.get(replan_result, "failed_action", "unknown"),
-      "reason" => if(recovered, do: "recovered_at_step_#{fail_step}", else: "failed_at_step_#{fail_step}"),
+      "reason" =>
+        if(recovered, do: "recovered_at_step_#{fail_step}", else: "failed_at_step_#{fail_step}"),
       "fail_step" => fail_step,
       "recovered" => recovered
     }

@@ -51,9 +51,9 @@ defmodule Taskweft.HRR.Query do
   @spec execute(Storage.store(), :all, term(), list(), keyword()) :: [map()]
   def execute(store, :all, query, params, opts) do
     threshold = Keyword.get(opts, :hrr_threshold, @default_hrr_threshold)
-    wheres    = Map.get(query, :wheres, [])
-    joins     = Map.get(query, :joins, [])
-    select    = Map.get(query, :select)
+    wheres = Map.get(query, :wheres, [])
+    joins = Map.get(query, :joins, [])
+    select = Map.get(query, :select)
 
     case source_name(query) do
       {:error, _} ->
@@ -150,17 +150,19 @@ defmodule Taskweft.HRR.Query do
   end
 
   defp semantic_join(store, left_rows, right_source, left_field, right_field, threshold) do
-    {_pool, dim}  = store
-    right_probes  = Storage.vectors_for_join(store, right_source, to_string(right_field))
+    {_pool, dim} = store
+    right_probes = Storage.vectors_for_join(store, right_source, to_string(right_field))
 
     Enum.flat_map(left_rows, fn left ->
-      query_text   = left_field_value(left, left_field) |> to_string()
+      query_text = left_field_value(left, left_field) |> to_string()
       query_phases = Taskweft.NIF.hrr_encode_text(query_text, dim)
 
       for {probe_bytes, right_map} <- right_probes,
-          sim = Taskweft.NIF.hrr_similarity(
-                  Taskweft.NIF.hrr_bytes_to_phases(probe_bytes, 0),
-                  query_phases),
+          sim =
+            Taskweft.NIF.hrr_similarity(
+              Taskweft.NIF.hrr_bytes_to_phases(probe_bytes, 0),
+              query_phases
+            ),
           sim >= threshold do
         join_row(left, right_map)
       end
@@ -172,6 +174,7 @@ defmodule Taskweft.HRR.Query do
 
   defp left_field_value(row, field) when is_list(row),
     do: Map.get(hd(row), to_string(field))
+
   defp left_field_value(row, field),
     do: Map.get(row, to_string(field))
 
@@ -244,7 +247,8 @@ defmodule Taskweft.HRR.Query do
 
   defp extract_probe({op, _, [field_ref, val_ref]}, params) when op in [:like, :ilike] do
     field = field_atom(field_ref)
-    text  = strip_wildcards(resolve(nil, val_ref, params))
+    text = strip_wildcards(resolve(nil, val_ref, params))
+
     if field && is_binary(text) && text != "",
       do: {:probe_field, field, text},
       else: :exact
@@ -272,8 +276,9 @@ defmodule Taskweft.HRR.Query do
     do: resolve(row, l, params) != resolve(row, r, params)
 
   defp eval_expr(row, {op, _, [l, r]}, params) when op in [:like, :ilike] do
-    val     = resolve(row, l, params)
+    val = resolve(row, l, params)
     pattern = resolve(row, r, params)
+
     is_binary(val) and is_binary(pattern) and
       Regex.match?(like_regex(pattern, op == :ilike), val)
   end
@@ -292,7 +297,7 @@ defmodule Taskweft.HRR.Query do
 
   defp resolve(_row, value, _params)
        when is_atom(value) or is_binary(value) or is_number(value) or is_nil(value),
-    do: value
+       do: value
 
   defp resolve(_row, _expr, _params), do: nil
 
@@ -317,8 +322,8 @@ defmodule Taskweft.HRR.Query do
         vb = row_binding(b, idx) |> Map.get(to_string(field))
 
         case cmp_dir(va, vb, dir) do
-          :eq  -> {:cont, :eq}
-          cmp  -> {:halt, cmp}
+          :eq -> {:cont, :eq}
+          cmp -> {:halt, cmp}
         end
       end) == :lt
     end)
@@ -329,12 +334,12 @@ defmodule Taskweft.HRR.Query do
 
   defp order_parts(_), do: {:asc, 0, nil}
 
-  defp cmp_dir(a, b, :asc),  do: cmp(a, b)
+  defp cmp_dir(a, b, :asc), do: cmp(a, b)
   defp cmp_dir(a, b, :desc), do: cmp(b, a)
 
   defp cmp(a, b) when a < b, do: :lt
   defp cmp(a, b) when a > b, do: :gt
-  defp cmp(_, _),             do: :eq
+  defp cmp(_, _), do: :eq
 
   # ---------------------------------------------------------------------------
   # LIMIT / OFFSET
@@ -347,16 +352,16 @@ defmodule Taskweft.HRR.Query do
   end
 
   defp maybe_drop(rows, nil), do: rows
-  defp maybe_drop(rows, n),   do: Enum.drop(rows, n)
+  defp maybe_drop(rows, n), do: Enum.drop(rows, n)
 
   defp maybe_take(rows, nil), do: rows
-  defp maybe_take(rows, n),   do: Enum.take(rows, n)
+  defp maybe_take(rows, n), do: Enum.take(rows, n)
 
-  defp unwrap_int(nil),                           do: nil
-  defp unwrap_int(%{expr: {:^, _, [n]}}),         do: n
+  defp unwrap_int(nil), do: nil
+  defp unwrap_int(%{expr: {:^, _, [n]}}), do: n
   defp unwrap_int(%{expr: n}) when is_integer(n), do: n
-  defp unwrap_int(n) when is_integer(n),          do: n
-  defp unwrap_int(_),                             do: nil
+  defp unwrap_int(n) when is_integer(n), do: n
+  defp unwrap_int(_), do: nil
 
   # ---------------------------------------------------------------------------
   # Helpers
@@ -365,20 +370,23 @@ defmodule Taskweft.HRR.Query do
   defp source_name(query) do
     case Map.get(query, :from) do
       %{source: {name, _}} when is_binary(name) -> {:ok, name}
-      %{source: name}      when is_binary(name) -> {:ok, name}
+      %{source: name} when is_binary(name) -> {:ok, name}
       other -> {:error, {:unknown_source, other}}
     end
   end
 
   defp strip_wildcards(nil), do: nil
-  defp strip_wildcards(s),   do: String.replace(s, ~r/[%_]/, " ") |> String.trim()
+  defp strip_wildcards(s), do: String.replace(s, ~r/[%_]/, " ") |> String.trim()
 
   defp like_regex(pattern, case_insensitive) do
     flags = if case_insensitive, do: "i", else: ""
+
     regex_str =
-      pattern |> Regex.escape()
+      pattern
+      |> Regex.escape()
       |> String.replace("\\%", ".*")
       |> String.replace("\\_", ".")
+
     Regex.compile!("^#{regex_str}$", flags)
   end
 end

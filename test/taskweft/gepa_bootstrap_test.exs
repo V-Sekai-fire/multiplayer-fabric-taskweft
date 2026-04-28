@@ -14,8 +14,20 @@ defmodule Taskweft.GEPA.BootstrapTest do
 
   @tag :red
   test "similar/1 returns traces ranked by HRR similarity to query" do
-    :ok = Taskweft.GEPA.Bootstrap.store(%{"plan" => [["a_fight"]], "score" => 1.0, "context" => "fight chickens"})
-    :ok = Taskweft.GEPA.Bootstrap.store(%{"plan" => [["a_gather"]], "score" => 0.5, "context" => "gather copper"})
+    :ok =
+      Taskweft.GEPA.Bootstrap.store(%{
+        "plan" => [["a_fight"]],
+        "score" => 1.0,
+        "context" => "fight chickens"
+      })
+
+    :ok =
+      Taskweft.GEPA.Bootstrap.store(%{
+        "plan" => [["a_gather"]],
+        "score" => 0.5,
+        "context" => "gather copper"
+      })
+
     results = Taskweft.GEPA.Bootstrap.similar("fight monster combat", 1)
     assert length(results) == 1
   end

@@ -8,8 +8,14 @@ defmodule Taskweft.HRRPropTest do
   def dim_gen, do: oneof([64, 128, 256, 512])
 
   def word_gen do
-    such_that w <- let(chars <- non_empty(list(oneof([range(?a, ?z), range(?A, ?Z), range(?0, ?9)]))), do: to_string(chars)),
+    such_that(
+      w <-
+        let(
+          chars <- non_empty(list(oneof([range(?a, ?z), range(?A, ?Z), range(?0, ?9)]))),
+          do: to_string(chars)
+        ),
       when: String.length(w) >= 1
+    )
   end
 
   def entities_gen do

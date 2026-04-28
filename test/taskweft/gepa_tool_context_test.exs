@@ -9,6 +9,7 @@ defmodule Taskweft.GEPA.ToolContextTest do
     Taskweft.GEPA.ToolRegistry.register(:test_tool_ctx, fn _ -> {:ok, "ok"} end,
       description: "a test tool"
     )
+
     context = Taskweft.GEPA.ToolContext.build()
     assert is_binary(context)
     assert String.contains?(context, "test_tool_ctx")
