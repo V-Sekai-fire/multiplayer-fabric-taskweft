@@ -101,7 +101,7 @@ defmodule Taskweft.HRR.Storage do
 
   @doc "Insert or replace a record, then rebuild the source bundle."
   @spec insert(store(), String.t(), term(), map()) :: :ok
-  def insert({pool, dim} = store, source, id, fields_map) do
+  def insert({_pool, dim} = store, source, id, fields_map) do
     json = Jason.encode!(fields_map)
     vec  = build_record_vector(fields_map, dim)
 

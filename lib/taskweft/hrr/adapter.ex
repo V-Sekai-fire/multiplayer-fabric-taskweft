@@ -212,7 +212,7 @@ defmodule Taskweft.HRR.Adapter do
   # Ecto.Adapter.Transaction callbacks
   # ---------------------------------------------------------------------------
 
-  def transaction(%{store: {pool, _dim} = store}, _opts, fun) do
+  def transaction(%{store: {pool, _dim}}, _opts, fun) do
     Postgrex.transaction(pool, fn conn ->
       Process.put({:taskweft_hrr_conn, pool}, conn)
       try do
