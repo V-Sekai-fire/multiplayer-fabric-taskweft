@@ -80,7 +80,7 @@
         "zone_registry":      3, "build_cache":        3, "operator_overlay":   3,
         "asset_delivery":     3, "baker_lifecycle":    3, "rectgtn_behavior":   3,
         "zone_border_handoff":3,
-        "openxr_simulator":   0, "isolated_submodule": 0, "vr_interaction":     0,
+        "openxr_simulator":   1, "isolated_submodule": 0, "vr_interaction":     0,
         "zone_manifest":      0, "concert_archetype":  0, "ragdoll_archetype":  0,
         "pcvr_player":        0, "sandbox_rebac":      0, "artifactsmmog_bot":  0,
         "convoy_chokepoint":  0, "jellyfish_demo":     0, "headless_observer":  0,
@@ -213,8 +213,9 @@
     "complete_openxr_simulator": {
       "description": "C=5. One approach: configure + activate. MCExecutor failure_rate models simulator not found / version mismatch.",
       "alternatives": [
-        {"name": "done",   "check": [{"pointer": "/phase/openxr_simulator", "eq": 3}], "subtasks": []},
-        {"name": "direct", "subtasks": [["a_stub","openxr_simulator","ifire"], ["a_green","openxr_simulator","ifire"], ["a_refactor","openxr_simulator","ifire"]]}
+        {"name": "done",             "check": [{"pointer": "/phase/openxr_simulator", "eq": 3}], "subtasks": []},
+        {"name": "resume_from_green","check": [{"pointer": "/phase/openxr_simulator", "eq": 1}], "subtasks": [["a_green","openxr_simulator","ifire"], ["a_refactor","openxr_simulator","ifire"]]},
+        {"name": "direct",           "subtasks": [["a_stub","openxr_simulator","ifire"], ["a_green","openxr_simulator","ifire"], ["a_refactor","openxr_simulator","ifire"]]}
       ]
     },
     "complete_vr_interaction": {

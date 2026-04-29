@@ -84,7 +84,7 @@ defmodule Taskweft do
   Encode a content-entity binding as raw bytes (little-endian float64).
 
   Computes `encode_text(content) ⊗ encode_atom(entity.lower())`.
-  Returns a binary suitable for storage in SQLite.
+  Returns a binary suitable for storage in CockroachDB (bytea column).
   """
   def hrr_encode_binding(content, entity, dim \\ 4096) do
     NIF.hrr_encode_binding(content, entity, dim)
@@ -95,7 +95,7 @@ defmodule Taskweft do
 
   Bundles `encode_text(content) ⊗ role_content` with per-entity
   `encode_atom(entity) ⊗ role_entity` components.
-  Returns a binary suitable for storage in SQLite.
+  Returns a binary suitable for storage in CockroachDB (bytea column).
   """
   def hrr_encode_fact(content, entities, dim \\ 4096) do
     NIF.hrr_encode_fact(content, entities, dim)

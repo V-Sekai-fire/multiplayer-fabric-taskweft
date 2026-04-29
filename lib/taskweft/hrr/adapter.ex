@@ -1,30 +1,32 @@
 defmodule Taskweft.HRR.Adapter do
   @moduledoc """
-  Ecto adapter backed by Holographic Reduced Representations, persisted to DETS.
+  Ecto adapter backed by Holographic Reduced Representations.
+  Persists records as JSON-LD files (one per source) using the KHR
+  interactivity context (`khr:planning/hrr/`).
 
   ## What HRR replaces SQL with
 
-  | SQL concept           | HRR operation                                                     |
-  |-----------------------|-------------------------------------------------------------------|
-  | Table                 | Per-source bundle (superposition of record vectors in DETS)       |
-  | INSERT                | `bundle(table, bind(role(field), encode(value)))`                 |
-  | DELETE                | Remove record, rebuild bundle                                     |
-  | WHERE field = value   | Exact in-memory equality after full scan                          |
-  | WHERE LIKE %query%    | `probe_field` → cosine-rank by `encode(stripped_pattern)`         |
-  | SELECT *              | Deserialized field maps from DETS                                 |
-  | UPDATE                | DELETE + INSERT                                                   |
+  | SQL concept           | HRR operation                                                      |
+  |-----------------------|--------------------------------------------------------------------|
+  | Table                 | Per-source bundle (superposition of record vectors)                |
+  | INSERT                | `bundle(bind(role(field), encode(value)))`                         |
+  | DELETE                | Remove record, rebuild bundle                                      |
+  | WHERE field = value   | Exact in-memory equality after full scan                           |
+  | WHERE LIKE %query%    | `probe_field` → cosine-rank by `encode(stripped_pattern)`          |
+  | SELECT *              | Deserialized field maps from JSON-LD                               |
+  | UPDATE                | DELETE + INSERT                                                    |
 
   ## Repo configuration
 
       config :my_app, MyApp.Repo,
         adapter: Taskweft.HRR.Adapter,
         hrr_dim: 1024,                    # vector dimension (default 1024)
-        name: MyApp.HRRPool,              # DETS table name
-        dets_path: "/var/data/hrr.dets"   # file path (default: System.tmp_dir!/hrr_<name>.dets)
+        name: MyApp.HRRPool,              # GenServer name
+        dets_path: "/var/data/hrr/"       # JSON-LD output directory
 
   ## Caveats
 
-  * Records are persisted in DETS as Erlang terms; vectors as binaries.
+  * Records are persisted as `<source>.jsonld` using `khr:planning/hrr/` terms.
   * `LIKE` / `ILIKE` use HRR cosine similarity (`probe_field`) rather than
     string pattern matching.  Pass `:hrr_threshold` in query opts to tune
     the minimum similarity score (default `0.1`).

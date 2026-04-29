@@ -33,3 +33,10 @@ __pycache__/
 
 # DETS files produced by tests
 *.dets
+taskweft_dev.db
+priv/erlfdb_nif.so
+priv/lib/libfdb_c.so
+priv/lib/libfdb_c.dylib
+taskweft_dev.db
+taskweft_test.db
+priv/fdb.cluster
