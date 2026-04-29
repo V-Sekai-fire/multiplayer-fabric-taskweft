@@ -28,8 +28,6 @@ defmodule Taskweft.MixProject do
       {:elixir_make, "~> 0.9"},
       {:ecto, "~> 3.12"},
       {:jason, "~> 1.4"},
-      {:instructor, "~> 0.1"},
-      {:ex_mcp, github: "azmaveth/ex_mcp"},
       {:propcheck, "~> 1.4", only: [:test, :dev], runtime: false},
       {:mox, "~> 1.2", only: :test}
     ]
