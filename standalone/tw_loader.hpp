@@ -22,112 +22,15 @@
 
 namespace TwLoader {
 
-// ---- Minimal JSON parser → TwValue ----------------------------------------
-
-inline void skip_ws(const char *&p, const char *end) {
-    while (p < end && std::isspace((unsigned char)*p)) ++p;
-}
-
-inline TwValue parse_json(const char *&p, const char *end);
-
-inline TwValue parse_json_string(const char *&p, const char *end) {
-    ++p; // skip opening "
-    std::string s;
-    while (p < end && *p != '"') {
-        if (*p == '\\' && p + 1 < end) {
-            ++p;
-            switch (*p) {
-                case '"':  s += '"';  break;
-                case '\\': s += '\\'; break;
-                case '/':  s += '/';  break;
-                case 'n':  s += '\n'; break;
-                case 'r':  s += '\r'; break;
-                case 't':  s += '\t'; break;
-                default:   s += *p;   break;
-            }
-        } else {
-            s += *p;
-        }
-        ++p;
-    }
-    if (p < end) ++p; // skip closing "
-    return TwValue(std::move(s));
-}
-
-inline TwValue parse_json_number(const char *&p, const char *end) {
-    const char *start = p;
-    bool is_float = false;
-    if (*p == '-') ++p;
-    while (p < end && std::isdigit((unsigned char)*p)) ++p;
-    if (p < end && *p == '.') {
-        is_float = true; ++p;
-        while (p < end && std::isdigit((unsigned char)*p)) ++p;
-    }
-    if (p < end && (*p == 'e' || *p == 'E')) {
-        is_float = true; ++p;
-        if (p < end && (*p == '+' || *p == '-')) ++p;
-        while (p < end && std::isdigit((unsigned char)*p)) ++p;
-    }
-    std::string tok(start, p - start);
-    if (is_float) return TwValue(std::stod(tok));
-    try { return TwValue((int64_t)std::stoll(tok)); }
-    catch (...) { return TwValue(std::stod(tok)); }
-}
-
-inline TwValue parse_json(const char *&p, const char *end) {
-    skip_ws(p, end);
-    if (p >= end) return TwValue{};
-
-    if (*p == '"') return parse_json_string(p, end);
-
-    if (*p == '[') {
-        ++p;
-        TwValue::Array arr;
-        skip_ws(p, end);
-        if (p < end && *p == ']') { ++p; return TwValue(std::move(arr)); }
-        while (p < end) {
-            arr.push_back(parse_json(p, end));
-            skip_ws(p, end);
-            if (p < end && *p == ',') { ++p; continue; }
-            break;
-        }
-        if (p < end && *p == ']') ++p;
-        return TwValue(std::move(arr));
-    }
-
-    if (*p == '{') {
-        ++p;
-        TwValue::Dict dict;
-        skip_ws(p, end);
-        if (p < end && *p == '}') { ++p; return TwValue(std::move(dict)); }
-        while (p < end) {
-            skip_ws(p, end);
-            auto key = parse_json_string(p, end);
-            skip_ws(p, end);
-            if (p < end && *p == ':') ++p;
-            dict[key.as_string()] = parse_json(p, end);
-            skip_ws(p, end);
-            if (p < end && *p == ',') { ++p; continue; }
-            break;
-        }
-        if (p < end && *p == '}') ++p;
-        return TwValue(std::move(dict));
-    }
-
-    if (*p == '-' || std::isdigit((unsigned char)*p)) return parse_json_number(p, end);
-
-    if (p + 4 <= end && std::strncmp(p, "true",  4) == 0) { p += 4; return TwValue(true); }
-    if (p + 5 <= end && std::strncmp(p, "false", 5) == 0) { p += 5; return TwValue(false); }
-    if (p + 4 <= end && std::strncmp(p, "null",  4) == 0) { p += 4; return TwValue{}; }
-
-    ++p;
-    return TwValue{};
-}
-
-inline TwValue parse_json_str(const std::string &json) {
-    const char *p = json.c_str();
-    return parse_json(p, p + json.size());
-}
+// ---- JSON parser — canonical implementation is in tw_json.hpp ---------------
+// tw_json.hpp is included transitively:
+//   tw_loader.hpp → tw_domain.hpp → tw_state.hpp → tw_rebac.hpp → tw_json.hpp
+// Using-declarations re-export into TwLoader so existing callers are unchanged.
+using TwJson::skip_ws;
+using TwJson::parse_json_string;
+using TwJson::parse_json_number;
+using TwJson::parse_json;
+using TwJson::parse_json_str;
 
 // ---- Expression evaluators -------------------------------------------------
 // KHR_interactivity §02 node types — tinygrad-style flat dispatch registry.
