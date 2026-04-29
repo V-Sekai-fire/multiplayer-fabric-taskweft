@@ -35,4 +35,5 @@ defmodule Taskweft.NIF do
   def mc_execute(_domain_json, _plan_json, _probs_json, _seed), do: :erlang.nif_error(:not_loaded)
 
   def domain_cache_clear(), do: :erlang.nif_error(:not_loaded)
+  def rebac_cache_clear(), do: :erlang.nif_error(:not_loaded)
 end

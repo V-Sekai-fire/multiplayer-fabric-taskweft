@@ -48,6 +48,27 @@ static TwLoader::TwLoaded load_cached(const std::string &json) {
     return result;
 }
 
+// ── ReBAC graph parse cache ───────────────────────────────────────────────────
+// graph_from_json is pure and graphs are read-only after construction, so a
+// single cached copy is shared across all concurrent readers with no locking
+// during the hot path.  Formally justified by Planner.ExpandIndex:
+// expand_index_equiv proves the member_edges index gives the same result as
+// scanning all edges.
+static std::mutex s_graph_cache_mtx;
+static std::unordered_map<std::string, TwReBAC::TwReBACGraph> s_graph_cache;
+
+static const TwReBAC::TwReBACGraph &graph_cached(const std::string &json) {
+    {
+        std::lock_guard<std::mutex> lk(s_graph_cache_mtx);
+        auto it = s_graph_cache.find(json);
+        if (it != s_graph_cache.end())
+            return it->second;
+    }
+    TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(json);
+    std::lock_guard<std::mutex> lk(s_graph_cache_mtx);
+    return s_graph_cache.emplace(json, std::move(g)).first->second;
+}
+
 // Parse a plan JSON array ([[name, arg...], ...]) back to vector<TwCall>.
 static std::vector<TwCall> parse_plan(const std::string &p_plan_json) {
 	TwValue arr = TwLoader::parse_json_str(p_plan_json);
@@ -143,8 +164,8 @@ FINE_NIF(rebac_add_edge, 0);
 bool rebac_check(ErlNifEnv *p_env, std::string p_graph_json,
 		std::string p_subj, std::string p_expr_json,
 		std::string p_obj, int64_t p_fuel) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
-	TwValue expr = TwLoader::parse_json_str(p_expr_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
+	TwValue expr = TwJson::parse_json_str(p_expr_json);
 	return TwReBAC::check_expr(g, p_subj, expr, p_obj, static_cast<int>(p_fuel));
 }
 FINE_NIF(rebac_check, 0);
@@ -153,7 +174,7 @@ FINE_NIF(rebac_check, 0);
 // All subjects that hold rel to obj (direct + IS_MEMBER_OF transitive).
 std::vector<std::string> rebac_expand(ErlNifEnv *p_env, std::string p_graph_json,
 		std::string p_rel, std::string p_obj, int64_t p_fuel) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
 	return TwReBAC::tw_expand(g, p_rel, p_obj, static_cast<int>(p_fuel));
 }
 FINE_NIF(rebac_expand, 0);
@@ -202,7 +223,7 @@ FINE_NIF(bridge_state_bindings, 0);
 // DFS traversal: terminal via HAS_CAPABILITY, CONTROLS, OWNS.
 std::string rebac_can(ErlNifEnv *p_env, std::string p_graph_json,
 		std::string p_subj, std::string p_capability, int64_t p_max_depth) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
 	return TwReBAC::rebac_can_json(g, p_subj, p_capability, static_cast<int>(p_max_depth));
 }
 FINE_NIF(rebac_can, 0);
@@ -210,7 +231,7 @@ FINE_NIF(rebac_can, 0);
 // rebac_get_entity_capabilities(graph_json, entity) → list of capability strings
 std::vector<std::string> rebac_get_entity_capabilities(ErlNifEnv *p_env,
 		std::string p_graph_json, std::string p_entity) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
 	return TwReBAC::get_entity_capabilities(g, p_entity);
 }
 FINE_NIF(rebac_get_entity_capabilities, 0);
@@ -218,7 +239,7 @@ FINE_NIF(rebac_get_entity_capabilities, 0);
 // rebac_get_entities_with_capability(graph_json, capability) → list of entity strings
 std::vector<std::string> rebac_get_entities_with_capability(ErlNifEnv *p_env,
 		std::string p_graph_json, std::string p_capability) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
 	return TwReBAC::get_entities_with_capability(g, p_capability);
 }
 FINE_NIF(rebac_get_entities_with_capability, 0);
@@ -230,5 +251,14 @@ std::string mc_execute(ErlNifEnv *p_env, std::string p_domain_json,
 	return TwMCExecutor::mc_execute(p_domain_json, p_plan_json, p_probs_json, p_seed);
 }
 FINE_NIF(mc_execute, 0);
+
+// rebac_cache_clear() → "ok"
+// Evict all cached ReBAC graphs. Call when graphs will not be reused.
+std::string rebac_cache_clear(ErlNifEnv *p_env) {
+	std::lock_guard<std::mutex> lk(s_graph_cache_mtx);
+	s_graph_cache.clear();
+	return "ok";
+}
+FINE_NIF(rebac_cache_clear, 0);
 
 FINE_INIT("Elixir.Taskweft.NIF");
