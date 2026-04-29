@@ -15,12 +15,25 @@ struct TwCall {
     std::vector<TwValue> args;
 };
 
-// One binding in a conjunctive goal: state[var][key] == desired.
-// Matches JSON Pointer "/var/key" with an eq condition.
+// One binding in a conjunctive goal: (var, key, desired).
+// Maps to IPyHOP unigoal ('var', 'key', desired_val).
+//
+// Satisfaction strategy (in priority order):
+//  1. ReBAC check — if state.rebac_graph is non-empty, use check_base_str
+//     (var = relation name, key = subject entity, desired = object entity).
+//     Inherits via IS_MEMBER_OF chains: a block inherits its group's location.
+//  2. Plain equality fallback — state[var][key] == desired (legacy behaviour).
 struct TwGoalBinding {
     std::string var;
     std::string key;
     TwValue     desired;
+
+    bool satisfied(const TwState &state) const {
+        if (!state.rebac_graph.edges.empty())
+            return TwReBAC::check_base_str(state.rebac_graph, key, var,
+                                           desired.as_string(), state.rebac_fuel);
+        return state.get_nested(var, TwValue(key)) == desired;
+    }
 };
 
 // Conjunctive goal: a list of (var, key, desired) bindings.
@@ -31,14 +44,14 @@ struct TwGoal {
 
     bool is_satisfied(const TwState &state) const {
         for (auto &b : bindings)
-            if (state.get_nested(b.var, TwValue(b.key)) != b.desired) return false;
+            if (!b.satisfied(state)) return false;
         return true;
     }
 
     std::vector<TwGoalBinding> unsatisfied(const TwState &state) const {
         std::vector<TwGoalBinding> unmet;
         for (auto &b : bindings)
-            if (state.get_nested(b.var, TwValue(b.key)) != b.desired) unmet.push_back(b);
+            if (!b.satisfied(state)) unmet.push_back(b);
         return unmet;
     }
 };
@@ -52,14 +65,14 @@ struct TwMultiGoal {
 
     bool is_satisfied(const TwState &state) const {
         for (const TwGoalBinding &b : bindings)
-            if (state.get_nested(b.var, TwValue(b.key)) != b.desired) return false;
+            if (!b.satisfied(state)) return false;
         return true;
     }
 
     std::vector<TwGoalBinding> unsatisfied(const TwState &state) const {
         std::vector<TwGoalBinding> unmet;
         for (const TwGoalBinding &b : bindings)
-            if (state.get_nested(b.var, TwValue(b.key)) != b.desired) unmet.push_back(b);
+            if (!b.satisfied(state)) unmet.push_back(b);
         return unmet;
     }
 };
