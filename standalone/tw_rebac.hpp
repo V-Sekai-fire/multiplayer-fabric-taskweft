@@ -3,7 +3,6 @@
 // JSON wire format mirrors Python: {"type":"base","rel":"OWNS"}, etc.
 #pragma once
 #include "tw_json.hpp"
-#include "tw_loader.hpp"
 #include "tw_value.hpp"
 
 #include <sstream>
@@ -57,6 +56,7 @@ struct TwEdge {
 	std::string subject;
 	std::string object;
 	RelationType rel = RelationType::UNKNOWN;
+	std::string rel_name; // always set; used for domain-specific relations
 };
 
 struct TwReBACGraph {
@@ -68,11 +68,16 @@ struct TwReBACGraph {
 	// named computed relation definitions (stored as TwValue)
 	std::unordered_map<std::string, TwValue> definitions;
 
-	void add_edge(const std::string &p_subj, const std::string &p_obj, RelationType p_rel) {
+	void add_edge(const std::string &p_subj, const std::string &p_obj, const std::string &p_rel_str) {
 		size_t idx = edges.size();
-		edges.push_back({p_subj, p_obj, p_rel});
+		edges.push_back({p_subj, p_obj, parse_rel(p_rel_str), p_rel_str});
 		subj_idx[p_subj].push_back(idx);
 		obj_idx[p_obj].push_back(idx);
+	}
+
+	// Overload for enum-typed callers (used internally).
+	void add_edge(const std::string &p_subj, const std::string &p_obj, RelationType p_rel) {
+		add_edge(p_subj, p_obj, rel_str(p_rel));
 	}
 
 	void define(const std::string &p_name, TwValue p_expr) {
@@ -86,19 +91,24 @@ inline bool check_expr(const TwReBACGraph &p_g, const std::string &p_subj,
 		const TwValue &p_expr, const std::string &p_obj, int p_fuel);
 
 // ---- Base check: direct edges + IS_MEMBER_OF transitive + CONTROLS delegation ---
+// Accepts either a RelationType (built-ins) or a raw string (domain-specific).
+// For domain-specific relations (rel == UNKNOWN), matching uses rel_name string.
 
 inline bool check_base(const TwReBACGraph &p_g, const std::string &p_subj,
-		RelationType p_rel, const std::string &p_obj, int p_fuel) {
+		RelationType p_rel, const std::string &p_rel_name, const std::string &p_obj, int p_fuel) {
 	if (p_fuel <= 0) {
 		return false;
 	}
 
-	// Direct edge
+	// Direct edge: built-ins match by enum; custom relations match by rel_name string.
 	auto sit = p_g.subj_idx.find(p_subj);
 	if (sit != p_g.subj_idx.end()) {
 		for (size_t idx : sit->second) {
 			const TwEdge &e = p_g.edges[idx];
-			if (e.rel == p_rel && e.object == p_obj) {
+			bool rel_match = (p_rel != RelationType::UNKNOWN)
+					? (e.rel == p_rel)
+					: (e.rel_name == p_rel_name);
+			if (rel_match && e.object == p_obj) {
 				return true;
 			}
 		}
@@ -108,7 +118,7 @@ inline bool check_base(const TwReBACGraph &p_g, const std::string &p_subj,
 			if (e.rel == RelationType::IS_MEMBER_OF) {
 				TwValue::Dict m;
 				m["type"] = TwValue(std::string("base"));
-				m["rel"]  = TwValue(rel_str(p_rel));
+				m["rel"]  = TwValue(p_rel_name);
 				if (check_expr(p_g, e.object, TwValue(std::move(m)), p_obj, p_fuel - 1)) {
 					return true;
 				}
@@ -132,6 +142,12 @@ inline bool check_base(const TwReBACGraph &p_g, const std::string &p_subj,
 	return false;
 }
 
+// Convenience: look up by relation string only (used by goal satisfaction).
+inline bool check_base_str(const TwReBACGraph &p_g, const std::string &p_subj,
+		const std::string &p_rel_name, const std::string &p_obj, int p_fuel) {
+	return check_base(p_g, p_subj, parse_rel(p_rel_name), p_rel_name, p_obj, p_fuel);
+}
+
 // ---- check_expr -----------------------------------------------------------
 
 inline bool check_expr(const TwReBACGraph &p_g, const std::string &p_subj,
@@ -151,7 +167,8 @@ inline bool check_expr(const TwReBACGraph &p_g, const std::string &p_subj,
 		if (rit == m.end()) {
 			return false;
 		}
-		return check_base(p_g, p_subj, parse_rel(rit->second.as_string()), p_obj, p_fuel);
+		const std::string &rel_name = rit->second.as_string();
+		return check_base(p_g, p_subj, parse_rel(rel_name), rel_name, p_obj, p_fuel);
 	}
 	if (type == "union") {
 		auto ait = m.find("a");
@@ -276,7 +293,7 @@ inline bool _rebac_dfs(const TwReBACGraph &p_g,
 				 e.rel == RelationType::CONTROLS ||
 				 e.rel == RelationType::OWNS)) {
 			p_path.push_back(p_current);
-			p_path.push_back(std::string("[") + rel_str(e.rel) + "]");
+			p_path.push_back(std::string("[") + e.rel_name + "]");
 			p_path.push_back(p_target);
 			return true;
 		}
@@ -289,7 +306,7 @@ inline bool _rebac_dfs(const TwReBACGraph &p_g,
 		std::unordered_set<std::string> sub_visited = p_visited;
 		if (_rebac_dfs(p_g, e.object, p_target, sub_visited, sub_path, p_depth - 1)) {
 			p_path.push_back(p_current);
-			p_path.push_back(std::string("[") + rel_str(e.rel) + "]");
+			p_path.push_back(std::string("[") + e.rel_name + "]");
 			for (size_t i = 1; i < sub_path.size(); ++i) {
 				p_path.push_back(sub_path[i]);
 			}
@@ -356,7 +373,7 @@ inline std::vector<std::string> get_entities_with_capability(const TwReBACGraph 
 // ---- JSON serialization / deserialization --------------------------------
 
 inline TwReBACGraph graph_from_json(const std::string &p_json) {
-	TwValue root = TwLoader::parse_json_str(p_json);
+	TwValue root = TwJson::parse_json_str(p_json);
 	TwReBACGraph g;
 	if (!root.is_dict()) {
 		return g;
@@ -377,7 +394,7 @@ inline TwReBACGraph graph_from_json(const std::string &p_json) {
 				continue;
 			}
 			g.add_edge(sit->second.as_string(), oit->second.as_string(),
-					parse_rel(rit->second.as_string()));
+					rit->second.as_string());
 		}
 	}
 
@@ -401,7 +418,7 @@ inline std::string graph_to_json(const TwReBACGraph &p_g) {
 		const TwEdge &e = p_g.edges[i];
 		oss << "{\"subject\":" << TwJson::escape_string(e.subject)
 			<< ",\"object\":" << TwJson::escape_string(e.object)
-			<< ",\"rel\":" << TwJson::escape_string(rel_str(e.rel))
+			<< ",\"rel\":" << TwJson::escape_string(e.rel_name)
 			<< '}';
 	}
 	oss << "],\"definitions\":{";

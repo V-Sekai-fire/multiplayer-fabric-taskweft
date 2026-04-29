@@ -2,6 +2,7 @@
 // Uses tsl::ordered_map to preserve JSON insertion order for deterministic
 // key iteration (matches Python dict ordering).
 #pragma once
+#include "tw_rebac.hpp"
 #include "tw_value.hpp"
 #include "thirdparty/tsl_ordered_map.h"
 #include <memory>
@@ -9,6 +10,9 @@
 
 struct TwState {
     tsl::ordered_map<std::string, TwValue> vars;
+    // ReBAC graph for goal satisfaction via hasCapability (supports type inheritance).
+    TwReBAC::TwReBACGraph rebac_graph;
+    int rebac_fuel = 8;
 
     void set_var(const std::string &key, TwValue val) { vars[key] = std::move(val); }
 

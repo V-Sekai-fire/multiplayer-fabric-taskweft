@@ -28,7 +28,8 @@ defmodule Taskweft.MixProject do
       {:elixir_make, "~> 0.9"},
       {:jason, "~> 1.4"},
       {:propcheck, "~> 1.4", only: [:test, :dev], runtime: false},
-      {:mox, "~> 1.2", only: :test}
+      {:mox, "~> 1.2", only: :test},
+      {:benchee, "~> 1.3", only: :dev, runtime: false}
     ]
   end
 end

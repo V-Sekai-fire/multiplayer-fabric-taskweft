@@ -88,7 +88,7 @@ FINE_NIF(check_temporal, 0);
 std::string rebac_add_edge(ErlNifEnv *p_env, std::string p_graph_json,
 		std::string p_subj, std::string p_obj, std::string p_rel) {
 	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
-	g.add_edge(p_subj, p_obj, TwReBAC::parse_rel(p_rel));
+	g.add_edge(p_subj, p_obj, p_rel);
 	return TwReBAC::graph_to_json(g);
 }
 FINE_NIF(rebac_add_edge, 0);
