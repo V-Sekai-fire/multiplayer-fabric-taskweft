@@ -6,6 +6,7 @@ import Planner.BlocksWorld
 import Planner.FloydWarshall
 import Planner.ReentrantPlanner
 import Planner.Commands
+import Planner.ReBACCorrectness
 -- Example proofs: soundness, completeness, optimality
 import Planner.SimpleTravelExample
 import Planner.BlocksWorldExamples
