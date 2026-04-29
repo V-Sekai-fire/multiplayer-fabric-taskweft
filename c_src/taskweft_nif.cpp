@@ -64,9 +64,11 @@ static const TwReBAC::TwReBACGraph &graph_cached(const std::string &json) {
         if (it != s_graph_cache.end())
             return it->second;
     }
+    // Parse outside the lock; concurrent misses produce the same graph.
     TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(json);
     std::lock_guard<std::mutex> lk(s_graph_cache_mtx);
-    return s_graph_cache.emplace(json, std::move(g)).first->second;
+    // try_emplace: if another thread already inserted, keep theirs and discard ours.
+    return s_graph_cache.try_emplace(json, std::move(g)).first->second;
 }
 
 // Parse a plan JSON array ([[name, arg...], ...]) back to vector<TwCall>.

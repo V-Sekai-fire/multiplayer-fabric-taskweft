@@ -36,6 +36,8 @@ struct TwGoalBinding {
             TwValue expr;
             if (!var.empty() && var.front() == '{') {
                 expr = TwJson::parse_json_str(var);
+                // Guard: malformed JSON yields NIL, not a dict — fail safely.
+                if (!expr.is_dict()) return false;
             } else {
                 TwValue::Dict m;
                 m["type"] = TwValue(std::string("base"));
