@@ -8,6 +8,7 @@ import Planner.ReentrantPlanner
 import Planner.Commands
 import Planner.ReBACCorrectness
 import Planner.ReBACGoal
+import Planner.DomainCache
 -- Example proofs: soundness, completeness, optimality
 import Planner.SimpleTravelExample
 import Planner.BlocksWorldExamples
