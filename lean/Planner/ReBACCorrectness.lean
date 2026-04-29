@@ -28,11 +28,8 @@ theorem hasCapability_direct (graph : List Relationship)
     (s : Entity) (rel : RelationType) (o : Entity) (n : Nat)
     (hmem : ⟨s, rel, o⟩ ∈ graph) :
     hasCapability graph s rel o (n + 1) = true := by
-  simp only [hasCapability, Bool.or_eq_true]
-  left; left
-  apply List.any_eq_true.mpr
-  refine ⟨{subject := s, relation := rel, object := o}, hmem, ?_⟩
-  simp
+  simp only [hasCapability, Bool.or_eq_true]; left; left
+  exact List.any_eq_true.mpr ⟨⟨s, rel, o⟩, hmem, by simp⟩
 
 -- ── 2. IS_MEMBER_OF transitivity ────────────────────────────────────────────
 
@@ -42,11 +39,8 @@ theorem hasCapability_member_trans (graph : List Relationship)
     (hmem : ⟨s, IS_MEMBER_OF, g⟩ ∈ graph)
     (hcap : hasCapability graph g rel o n = true) :
     hasCapability graph s rel o (n + 1) = true := by
-  simp only [hasCapability, Bool.or_eq_true]
-  left; right
-  apply List.any_eq_true.mpr
-  refine ⟨{subject := s, relation := IS_MEMBER_OF, object := g}, hmem, ?_⟩
-  simp [hcap]
+  simp only [hasCapability, Bool.or_eq_true]; left; right
+  exact List.any_eq_true.mpr ⟨⟨s, IS_MEMBER_OF, g⟩, hmem, by simp [hcap]⟩
 
 -- ── 3. Fuel monotonicity ────────────────────────────────────────────────────
 
@@ -64,13 +58,9 @@ private theorem hasCapability_fuel_succ (graph : List Relationship)
     rcases h with ((hdirect | hmember) | hdeleg)
     · exact Or.inl (Or.inl hdirect)
     · apply Or.inl; apply Or.inr
-      rw [List.any_eq_true] at hmember ⊢
-      obtain ⟨r, hr_mem, hr_and⟩ := hmember
-      simp only [Bool.and_eq_true] at hr_and
-      obtain ⟨⟨hsubj, hrel⟩, hcap⟩ := hr_and
-      refine ⟨r, hr_mem, ?_⟩
-      simp only [Bool.and_eq_true]
-      exact ⟨⟨hsubj, hrel⟩, ih r.object hcap⟩
+      simp only [List.any_eq_true, Bool.and_eq_true] at hmember ⊢
+      obtain ⟨r, hr_mem, ⟨⟨hsubj, hrel⟩, hcap⟩⟩ := hmember
+      exact ⟨r, hr_mem, ⟨⟨hsubj, hrel⟩, ih r.object hcap⟩⟩
     · exact Or.inr hdeleg
 
 /-- `hasCapability` is monotone in fuel. -/
@@ -115,35 +105,14 @@ theorem checkRelationExpr_union_right (graph : List Relationship)
 
 -- ── 6. Expand soundness ─────────────────────────────────────────────────────
 
-/-- Every entity returned by `expand` genuinely holds the relation. -/
+/-- Every entity returned by `expand` genuinely holds the relation.
+    Delegates to `expandSoundness` in Planner.Capabilities; included here so
+    the benchmark struct is self-contained. -/
 theorem expand_sound (graph : List Relationship)
     (rel : RelationType) (o : Entity) (fuel : Nat)
     (s : Entity) (hs : s ∈ expand graph rel o fuel) :
-    hasCapability graph s rel o (fuel + 1) = true := by
-  simp only [expand, List.mem_eraseDups, List.mem_append] at hs
-  rcases hs with hdirect | hmember
-  · obtain ⟨r, hr_mem, hr_eq⟩ := List.mem_filterMap.mp hdirect
-    by_cases hcond : (r.relation == rel && r.object == o) = true
-    · rw [if_pos hcond] at hr_eq
-      simp only [Option.some.injEq] at hr_eq
-      simp only [Bool.and_eq_true, beq_iff_eq] at hcond
-      obtain ⟨hrel, hobj⟩ := hcond
-      subst hr_eq
-      exact hasCapability_direct graph r.subject rel o fuel
-              (by cases r; simp_all)
-    · rw [Bool.not_eq_true] at hcond
-      simp [hcond] at hr_eq
-  · obtain ⟨r, hr_mem, hr_eq⟩ := List.mem_filterMap.mp hmember
-    by_cases hcond : (r.relation == IS_MEMBER_OF && hasCapability graph r.object rel o fuel) = true
-    · rw [if_pos hcond] at hr_eq
-      simp only [Option.some.injEq] at hr_eq
-      simp only [Bool.and_eq_true, beq_iff_eq] at hcond
-      obtain ⟨hrel, hcap⟩ := hcond
-      subst hr_eq
-      exact hasCapability_member_trans graph r.subject r.object rel o fuel
-              (by cases r; simp_all) hcap
-    · rw [Bool.not_eq_true] at hcond
-      simp [hcond] at hr_eq
+    hasCapability graph s rel o (fuel + 1) = true :=
+  expandSoundness graph rel o fuel s hs
 
 -- ── Summary ─────────────────────────────────────────────────────────────────
 
