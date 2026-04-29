@@ -234,12 +234,17 @@ inline std::vector<std::string> tw_expand(const TwReBACGraph &p_g,
 	RelationType rel = parse_rel(p_rel_str);
 	std::unordered_set<std::string> result;
 
-	// Direct holders
+	// Direct holders: built-ins match by enum; custom relations (UNKNOWN) match by rel_name.
+	// Without this two-branch check, every UNKNOWN-typed edge (LOC, ON, CLEAR, …) to
+	// p_obj would be included when any one custom relation is queried — soundness bug.
 	auto oit = p_g.obj_idx.find(p_obj);
 	if (oit != p_g.obj_idx.end()) {
 		for (size_t idx : oit->second) {
 			const TwEdge &e = p_g.edges[idx];
-			if (e.rel == rel) {
+			bool rel_match = (rel != RelationType::UNKNOWN)
+					? (e.rel == rel)
+					: (e.rel_name == p_rel_str);
+			if (rel_match) {
 				result.insert(e.subject);
 			}
 		}
