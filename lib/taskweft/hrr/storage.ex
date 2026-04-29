@@ -26,7 +26,7 @@ defmodule Taskweft.HRR.Storage do
   def insert({srv, dim}, source, id, fields_map) do
     vec = build_record_vector(fields_map, dim)
     :ok = TableServer.put(srv, source, to_string(id), fields_map, vec)
-    rebuild_bundle({srv, dim}, source)
+    rebuild_bundle(srv, source)
   end
 
   @spec get(store(), String.t(), term()) :: map() | nil
@@ -34,9 +34,9 @@ defmodule Taskweft.HRR.Storage do
     do: TableServer.get(srv, source, to_string(id))
 
   @spec delete(store(), String.t(), term()) :: :ok
-  def delete({srv, dim} = store, source, id) do
+  def delete({srv, _}, source, id) do
     :ok = TableServer.remove(srv, source, to_string(id))
-    rebuild_bundle(store, source)
+    rebuild_bundle(srv, source)
   end
 
   @spec all(store(), String.t()) :: [map()]
@@ -131,7 +131,7 @@ defmodule Taskweft.HRR.Storage do
     _ -> nil
   end
 
-  defp rebuild_bundle({srv, _dim}, source) do
+  defp rebuild_bundle(srv, source) do
     vecs = TableServer.all_vecs(srv, source) |> Enum.map(fn {_fields, vec} -> vec end)
 
     case vecs do
