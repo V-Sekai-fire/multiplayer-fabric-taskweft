@@ -5,21 +5,25 @@ import Planner.ReBACCorrectness
 /-!
 # ReBAC-backed Unigoal / Multigoal
 
-Replaces the unigoal `(var, arg, val)` equality check with a ReBAC
-capability check, enabling type inheritance via IS_MEMBER_OF chains.
+Replaces the unigoal `(var, arg, val)` equality check with a full ReBAC
+relation-expression check, supporting all relation combinators.
 
 ## Mapping
 
-  unigoal `('loc', 'c1', 'loc2')` → `hasCapability graph "c1" LOC "loc2" fuel`
+  unigoal `('loc', 'c1', 'loc2')` → `checkRelationExpr graph "c1" (.base LOC) "loc2" fuel`
+
+  union goal: `checkRelationExpr graph s (.union (.base OWNS) (.base CONTROLS)) o fuel`
 
 A block `c1 IS_MEMBER_OF SomeGroup` where `SomeGroup --[LOC]--> loc2` satisfies
-the goal without a direct edge — this is the inheritance benefit over plain
-state-variable equality.
+any base-relation goal without a direct edge (type inheritance via IS_MEMBER_OF).
 
 ## Relation to TwGoalBinding (C++)
 
-  TwGoalBinding { var = "LOC", key = "c1", desired = "loc2" }
-  → uniSatisfied graph fuel { subj := "c1", rel := LOC, obj := "loc2" }
+  TwGoalBinding { var = "LOC",   key = "c1", desired = "loc2" }
+  → plain string → auto-wrapped as {"type":"base","rel":"LOC"}
+
+  TwGoalBinding { var = "{\"type\":\"union\",...}", key = "c1", desired = "loc2" }
+  → parsed as full RelationExpr JSON → check_expr call
 
 Goals and multigoals continue to work: a multigoal is a conjunction and
 the planner iterates unsatisfied bindings with backtracking as before.
@@ -29,13 +33,14 @@ namespace ReBACGoal
 
 open RelationType ReBACCorrectness
 
--- ── Unigoal as a ReBAC triple ────────────────────────────────────────────────
+-- ── Unigoal: full RelationExpr ───────────────────────────────────────────────
 
-/-- A unigoal: (subject, relation, object).
-    Replaces the IPyHOP `(var_name, arg, desired_val)` tuple. -/
+/-- A unigoal: (subject, relation-expression, object).
+    `expr` may be any `RelationExpr` — base, union, intersection,
+    difference, or tuple_to_userset. -/
 structure UniGoal where
   subj : Entity
-  rel  : RelationType
+  expr : RelationExpr
   obj  : Entity
   deriving DecidableEq, Repr
 
@@ -45,32 +50,88 @@ abbrev MultiGoal := List UniGoal
 -- ── Satisfaction ─────────────────────────────────────────────────────────────
 
 def uniSatisfied (graph : List Relationship) (fuel : Nat) (g : UniGoal) : Bool :=
-  hasCapability graph g.subj g.rel g.obj fuel
+  checkRelationExpr graph g.subj g.expr g.obj fuel
 
 def multiSatisfied (graph : List Relationship) (fuel : Nat) (gs : MultiGoal) : Bool :=
   gs.all (uniSatisfied graph fuel)
 
--- ── 1. Direct-edge soundness ─────────────────────────────────────────────────
+-- ── 1. Base-expression soundness ─────────────────────────────────────────────
 
-/-- A direct edge `⟨g.subj, g.rel, g.obj⟩` satisfies the unigoal at fuel ≥ 1. -/
-theorem uniSatisfied_direct (graph : List Relationship) (g : UniGoal) (n : Nat)
-    (hmem : ⟨g.subj, g.rel, g.obj⟩ ∈ graph) :
-    uniSatisfied graph (n + 1) g = true :=
-  hasCapability_direct graph g.subj g.rel g.obj n hmem
+/-- A direct edge satisfies a `.base rel` unigoal. -/
+theorem uniSatisfied_base_direct (graph : List Relationship)
+    (s : Entity) (rel : RelationType) (o : Entity) (n : Nat)
+    (hmem : ⟨s, rel, o⟩ ∈ graph) :
+    uniSatisfied graph (n + 2) ⟨s, .base rel, o⟩ = true :=
+  checkRelationExpr_base_sound graph s rel o (n + 1)
+    (hasCapability_direct graph s rel o n hmem)
 
--- ── 2. IS_MEMBER_OF inheritance ──────────────────────────────────────────────
+/-- IS_MEMBER_OF inheritance for `.base rel` goals. -/
+theorem uniSatisfied_base_inherited (graph : List Relationship)
+    (s grp : Entity) (rel : RelationType) (o : Entity) (n : Nat)
+    (hmem : ⟨s, IS_MEMBER_OF, grp⟩ ∈ graph)
+    (hgrp : hasCapability graph grp rel o n = true) :
+    uniSatisfied graph (n + 2) ⟨s, .base rel, o⟩ = true := by
+  simp only [uniSatisfied, checkRelationExpr_base_eq]
+  exact hasCapability_member_trans graph s grp rel o n hmem hgrp
 
-/-- If `s IS_MEMBER_OF grp` and `grp` satisfies the goal, so does `s`.
-    This is the key inheritance property: a block inherits the location
-    (or any other relation) of any group it belongs to. -/
-theorem uniSatisfied_inherited (graph : List Relationship)
-    (s grp : Entity) (g : UniGoal) (n : Nat)
-    (hmem  : ⟨s, IS_MEMBER_OF, grp⟩ ∈ graph)
-    (hgrp  : uniSatisfied graph n { g with subj := grp } = true) :
-    uniSatisfied graph (n + 1) { g with subj := s } = true :=
-  hasCapability_member_trans graph s grp g.rel g.obj n hmem hgrp
+-- ── 2. Union goals ───────────────────────────────────────────────────────────
 
--- ── 3. Multigoal conjunction ─────────────────────────────────────────────────
+/-- If the left branch of a union is satisfied at fuel `n`, the union goal
+    is satisfied at fuel `n + 1`. -/
+theorem uniSatisfied_union_left (graph : List Relationship)
+    (s : Entity) (a b : RelationExpr) (o : Entity) (n : Nat)
+    (h : checkRelationExpr graph s a o n = true) :
+    uniSatisfied graph (n + 1) ⟨s, .union a b, o⟩ = true :=
+  checkRelationExpr_union_left graph s a b o n h
+
+/-- If the right branch of a union is satisfied at fuel `n`, the union goal
+    is satisfied at fuel `n + 1`. -/
+theorem uniSatisfied_union_right (graph : List Relationship)
+    (s : Entity) (a b : RelationExpr) (o : Entity) (n : Nat)
+    (h : checkRelationExpr graph s b o n = true) :
+    uniSatisfied graph (n + 1) ⟨s, .union a b, o⟩ = true :=
+  checkRelationExpr_union_right graph s a b o n h
+
+-- ── 3. Intersection goals ────────────────────────────────────────────────────
+
+/-- Both branches satisfied implies the intersection goal is satisfied. -/
+theorem uniSatisfied_intersection (graph : List Relationship)
+    (s : Entity) (a b : RelationExpr) (o : Entity) (n : Nat)
+    (ha : checkRelationExpr graph s a o n = true)
+    (hb : checkRelationExpr graph s b o n = true) :
+    uniSatisfied graph (n + 1) ⟨s, .intersection a b, o⟩ = true := by
+  simp only [uniSatisfied, checkRelationExpr, Bool.and_eq_true]
+  exact ⟨ha, hb⟩
+
+/-- Intersection implies each branch. -/
+theorem uniSatisfied_intersection_left (graph : List Relationship)
+    (s : Entity) (a b : RelationExpr) (o : Entity) (n : Nat)
+    (h : uniSatisfied graph (n + 1) ⟨s, .intersection a b, o⟩ = true) :
+    checkRelationExpr graph s a o n = true := by
+  simp only [uniSatisfied, checkRelationExpr, Bool.and_eq_true] at h
+  exact h.1
+
+theorem uniSatisfied_intersection_right (graph : List Relationship)
+    (s : Entity) (a b : RelationExpr) (o : Entity) (n : Nat)
+    (h : uniSatisfied graph (n + 1) ⟨s, .intersection a b, o⟩ = true) :
+    checkRelationExpr graph s b o n = true := by
+  simp only [uniSatisfied, checkRelationExpr, Bool.and_eq_true] at h
+  exact h.2
+
+-- ── 4. Tuple-to-userset goals ────────────────────────────────────────────────
+
+/-- A pivot edge `⟨s, pivotRel, mid⟩` plus `mid` satisfying the inner expression
+    yields a `tupleToUserset` goal. -/
+theorem uniSatisfied_ttu (graph : List Relationship)
+    (s mid : Entity) (pivotRel : RelationType) (inner : RelationExpr) (o : Entity) (n : Nat)
+    (hpivot : ⟨s, pivotRel, mid⟩ ∈ graph)
+    (hinner : checkRelationExpr graph mid inner o n = true) :
+    uniSatisfied graph (n + 1) ⟨s, .tupleToUserset pivotRel inner, o⟩ = true := by
+  simp only [uniSatisfied, checkRelationExpr]
+  apply List.any_eq_true.mpr
+  exact ⟨⟨s, pivotRel, mid⟩, hpivot, by simp [hinner]⟩
+
+-- ── 5. Multigoal conjunction ─────────────────────────────────────────────────
 
 @[simp]
 theorem multiSatisfied_nil (graph : List Relationship) (fuel : Nat) :
@@ -102,22 +163,68 @@ theorem multiSatisfied_false_of_member (graph : List Relationship) (fuel : Nat)
   | false => rfl
   | true  => exact absurd hb hne
 
--- ── 4. Fuel monotonicity ─────────────────────────────────────────────────────
+-- ── 6. Fuel monotonicity ─────────────────────────────────────────────────────
+-- Note: `.difference a b` is NOT fuel-monotone (b may become satisfiable at
+-- higher fuel, flipping the result). Monotonicity is proved per expression type
+-- for the monotone combinators: base, union, intersection, tupleToUserset.
 
-/-- A satisfied unigoal remains satisfied with more fuel. -/
-theorem uniSatisfied_fuel_mono (graph : List Relationship) (g : UniGoal)
-    (n : Nat) (h : uniSatisfied graph n g = true) (k : Nat) :
-    uniSatisfied graph (n + k) g = true :=
-  hasCapability_fuel_mono graph g.subj g.rel g.obj n h k
+/-- A `.base rel` unigoal is fuel-monotone. -/
+theorem uniSatisfied_base_fuel_mono (graph : List Relationship)
+    (s : Entity) (rel : RelationType) (o : Entity)
+    (n : Nat) (h : uniSatisfied graph n ⟨s, .base rel, o⟩ = true) (k : Nat) :
+    uniSatisfied graph (n + k) ⟨s, .base rel, o⟩ = true := by
+  simp only [uniSatisfied] at *
+  cases n with
+  | zero => simp [checkRelationExpr] at h
+  | succ p =>
+    simp only [checkRelationExpr_base_eq] at h ⊢
+    have hk : p + k + 1 = p + 1 + k := by omega
+    rw [show p.succ + k = (p + k) + 1 from by omega]
+    simp only [checkRelationExpr_base_eq]
+    exact hasCapability_fuel_mono graph s rel o p h k
 
-/-- A satisfied multigoal remains satisfied with more fuel. -/
-theorem multiSatisfied_fuel_mono (graph : List Relationship) (gs : MultiGoal)
-    (n : Nat) (h : multiSatisfied graph n gs = true) (k : Nat) :
+/-- A `.union` unigoal is fuel-monotone when each branch is. -/
+theorem uniSatisfied_union_fuel_mono (graph : List Relationship)
+    (s : Entity) (a b : RelationExpr) (o : Entity) (n : Nat) (k : Nat)
+    (ha_mono : ∀ m, checkRelationExpr graph s a o m = true →
+                    checkRelationExpr graph s a o (m + k) = true)
+    (hb_mono : ∀ m, checkRelationExpr graph s b o m = true →
+                    checkRelationExpr graph s b o (m + k) = true)
+    (h : uniSatisfied graph n ⟨s, .union a b, o⟩ = true) :
+    uniSatisfied graph (n + k) ⟨s, .union a b, o⟩ = true := by
+  simp only [uniSatisfied] at *
+  cases n with
+  | zero => simp [checkRelationExpr] at h
+  | succ p =>
+    simp only [checkRelationExpr, Bool.or_eq_true] at h ⊢
+    rw [show p.succ + k = (p + k) + 1 from by omega]
+    simp only [checkRelationExpr, Bool.or_eq_true]
+    rcases h with ha | hb
+    · exact Or.inl (ha_mono p ha)
+    · exact Or.inr (hb_mono p hb)
+
+/-- A satisfied multigoal of `.base` goals remains satisfied with more fuel. -/
+theorem multiSatisfied_base_fuel_mono (graph : List Relationship)
+    (gs : MultiGoal) (n : Nat)
+    (h : multiSatisfied graph n gs = true)
+    (hall_base : ∀ g ∈ gs, ∃ rel, g.expr = .base rel)
+    (k : Nat) :
     multiSatisfied graph (n + k) gs = true := by
   rw [multiSatisfied_iff] at h ⊢
-  exact fun g hg => uniSatisfied_fuel_mono graph g n (h g hg) k
+  intro g hg
+  obtain ⟨rel, hexpr⟩ := hall_base g hg
+  simp only [uniSatisfied] at h ⊢
+  have hg_sat := h g hg
+  rw [hexpr] at hg_sat ⊢
+  cases n with
+  | zero => simp [checkRelationExpr] at hg_sat
+  | succ p =>
+    simp only [checkRelationExpr_base_eq] at hg_sat ⊢
+    rw [show p.succ + k = (p + k) + 1 from by omega]
+    simp only [checkRelationExpr_base_eq]
+    exact hasCapability_fuel_mono graph g.subj rel g.obj p hg_sat k
 
--- ── 5. Subset monotonicity ───────────────────────────────────────────────────
+-- ── 7. Subset monotonicity ───────────────────────────────────────────────────
 
 /-- Removing goals from a satisfied multigoal leaves it satisfied. -/
 theorem multiSatisfied_of_subset (graph : List Relationship) (fuel : Nat)

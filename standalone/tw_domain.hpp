@@ -19,9 +19,12 @@ struct TwCall {
 // Maps to IPyHOP unigoal ('var', 'key', desired_val).
 //
 // Satisfaction strategy (in priority order):
-//  1. ReBAC check — if state.rebac_graph is non-empty, use check_base_str
-//     (var = relation name, key = subject entity, desired = object entity).
-//     Inherits via IS_MEMBER_OF chains: a block inherits its group's location.
+//  1. ReBAC check — if state.rebac_graph is non-empty:
+//     • var is a JSON object  → parsed as a full RelationExpr (union, intersection,
+//       difference, tuple_to_userset, …) and evaluated via check_expr.
+//     • var is a plain string → auto-wrapped as {"type":"base","rel":var}
+//       covering all relation types with IS_MEMBER_OF inheritance.
+//     key = subject entity, desired = object entity.
 //  2. Plain equality fallback — state[var][key] == desired (legacy behaviour).
 struct TwGoalBinding {
     std::string var;
@@ -29,9 +32,19 @@ struct TwGoalBinding {
     TwValue     desired;
 
     bool satisfied(const TwState &state) const {
-        if (!state.rebac_graph.edges.empty())
-            return TwReBAC::check_base_str(state.rebac_graph, key, var,
-                                           desired.as_string(), state.rebac_fuel);
+        if (!state.rebac_graph.edges.empty()) {
+            TwValue expr;
+            if (!var.empty() && var.front() == '{') {
+                expr = TwJson::parse_json_str(var);
+            } else {
+                TwValue::Dict m;
+                m["type"] = TwValue(std::string("base"));
+                m["rel"]  = TwValue(var);
+                expr = TwValue(std::move(m));
+            }
+            return TwReBAC::check_expr(state.rebac_graph, key, expr,
+                                       desired.as_string(), state.rebac_fuel);
+        }
         return state.get_nested(var, TwValue(key)) == desired;
     }
 };
