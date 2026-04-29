@@ -26,7 +26,6 @@ defmodule Taskweft.MixProject do
   defp deps do
     [
       {:elixir_make, "~> 0.9"},
-      {:ecto, "~> 3.12"},
       {:jason, "~> 1.4"},
       {:propcheck, "~> 1.4", only: [:test, :dev], runtime: false},
       {:mox, "~> 1.2", only: :test}

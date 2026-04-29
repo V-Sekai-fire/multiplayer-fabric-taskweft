@@ -5,7 +5,6 @@
 //   taskweft --temporal <domain> [problem]                 plan + temporal metadata (ISO 8601 JSON)
 //   taskweft --simulate <domain> [problem]                 simulate plan execution (JSON)
 //   taskweft --replan <fail_step> <domain> [problem]       full replan after action failure (JSON)
-//   taskweft --replan-inc <fail_step> <domain> [problem]   incremental replan via solution tree (JSON)
 //   taskweft --hrr <word> [dim]                            print HRR atom phases for a word
 #include "../standalone/tw_loader.hpp"
 #include "../standalone/tw_planner.hpp"
@@ -93,30 +92,6 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    // --replan-inc N: incremental replan via solution tree
-    if (argc >= 4 && std::string(argv[1]) == "--replan-inc") {
-        int fail_step = std::stoi(argv[2]);
-        TwLoader::TwLoaded loaded;
-        if (argc >= 5)
-            loaded = TwLoader::load_file_pair(argv[3], argv[4]);
-        else
-            loaded = TwLoader::load_file(argv[3]);
-        if (!loaded.state) {
-            std::cerr << "taskweft: cannot read file(s)\n";
-            return 1;
-        }
-        TwSolTree tree;
-        auto plan = tw_plan_with_tree(loaded.state, loaded.tasks, loaded.domain, tree);
-        if (!plan) { std::cout << "null\n"; return 1; }
-        TwReplanResult rr = tw_replan_incremental(loaded.state, *plan, loaded.tasks,
-                                                   loaded.domain, tree, fail_step);
-        std::string new_plan_json = rr.recovered
-            ? TwLoader::plan_to_json(*rr.new_plan) : "null";
-        std::cout << tw_replan_to_json(fail_step, rr,
-                                        TwLoader::plan_to_json(*plan),
-                                        new_plan_json) << "\n";
-        return 0;
-    }
 
     // Default: plan and print
     TwLoader::TwLoaded loaded;
