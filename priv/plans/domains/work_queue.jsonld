@@ -5,7 +5,7 @@
   },
   "@type": "domain:Definition",
   "name": "work_queue",
-  "version": "4.0",
+  "version": "4.1",
   "description": "multiplayer-fabric work queue (2026-04-28). Actions are deterministic. Commands (actions sent to the real world) are probabilistic — MCExecutor models failure with a per-run failure_rate. Method alternatives encode genuinely different approaches for complex items, not duration variants. Single entity (ifire), one Saturday per week.",
 
   "scope": "Shared MMOG fabric beneath multiplayer-fabric-xr-dev (VR) and multiplayer-fabric-rpg (RPG): engine assembly, zone networking, and interest management.",
@@ -80,6 +80,8 @@
         "zone_registry":      3, "build_cache":        3, "operator_overlay":   3,
         "asset_delivery":     3, "baker_lifecycle":    3, "rectgtn_behavior":   3,
         "zone_border_handoff":3,
+        "taskweft_lean_proofs":3,
+        "taskweft_perf":      3,
         "openxr_simulator":   1, "isolated_submodule": 0, "vr_interaction":     0,
         "zone_manifest":      0, "concert_archetype":  0, "ragdoll_archetype":  0,
         "pcvr_player":        0, "sandbox_rebac":      0, "artifactsmmog_bot":  0,
@@ -246,6 +248,34 @@
         {"name": "done",            "check": [{"pointer": "/phase/sandbox_rebac", "eq": 3}], "subtasks": []},
         {"name": "direct",          "subtasks": [["a_stub","sandbox_rebac","ifire"], ["a_green","sandbox_rebac","ifire"], ["a_refactor","sandbox_rebac","ifire"]]},
         {"name": "capability_first","subtasks": [["a_set_prototype_first","sandbox_rebac"], ["a_stub","sandbox_rebac","ifire"], ["a_green","sandbox_rebac","ifire"], ["a_green","sandbox_rebac","ifire"], ["a_refactor","sandbox_rebac","ifire"]]}
+      ]
+    },
+    "complete_taskweft_lean_proofs": {
+      "description": "C=3. Done 2026-04-29. Lean 4 formal proofs: ReBACCorrectness (direct/member/fuel/expand soundness), ReBACGoal (UniGoal/MultiGoal via checkRelationExpr, all combinators), DomainCache (plan_cache_equiv), ExpandIndex (indexed_edges_sound/complete + invariant preservation by add_edge).",
+      "alternatives": [
+        {"name": "done", "check": [{"pointer": "/phase/taskweft_lean_proofs", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["a_stub","taskweft_lean_proofs","ifire"], ["a_green","taskweft_lean_proofs","ifire"], ["a_refactor","taskweft_lean_proofs","ifire"]]}
+      ]
+    },
+    "complete_taskweft_perf": {
+      "description": "C=3. Done 2026-04-29. Domain parse cache (plan 31µs→14µs, 2.2×), ReBAC graph cache (check_rel/1k 480µs→6.5µs, 74×), IS_MEMBER_OF member_idx (expand/fan-1k 1366µs→315µs, 4.3×), tw_expand soundness fix (custom relations conflated via UNKNOWN). Benchmarked vs IPyHOP: 2.7–8× faster.",
+      "alternatives": [
+        {"name": "done", "check": [{"pointer": "/phase/taskweft_perf", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["a_stub","taskweft_perf","ifire"], ["a_green","taskweft_perf","ifire"], ["a_refactor","taskweft_perf","ifire"]]}
+      ]
+    },
+    "complete_taskweft_lean_proofs": {
+      "description": "C=3. Lean 4 formal proofs for taskweft: ReBACCorrectness (direct/member/fuel/expand soundness), ReBACGoal (UniGoal/MultiGoal via checkRelationExpr), DomainCache (plan_cache_equiv), ExpandIndex (indexed_edges_sound/complete, invariant preservation). Benchmark: proofs are the spec; C++ must match.",
+      "alternatives": [
+        {"name": "done", "check": [{"pointer": "/phase/taskweft_lean_proofs", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["a_stub","taskweft_lean_proofs","ifire"], ["a_green","taskweft_lean_proofs","ifire"], ["a_refactor","taskweft_lean_proofs","ifire"]]}
+      ]
+    },
+    "complete_taskweft_perf": {
+      "description": "C=3. taskweft performance: domain parse cache (plan 31µs→14µs), ReBAC graph cache (check_rel 480µs→6.5µs, 74×), IS_MEMBER_OF member_idx (expand fan-1k 1366µs→315µs), tw_expand soundness fix for custom relations. Benchmarked vs IPyHOP: 2.7–8× faster on canonical problems.",
+      "alternatives": [
+        {"name": "done", "check": [{"pointer": "/phase/taskweft_perf", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["a_stub","taskweft_perf","ifire"], ["a_green","taskweft_perf","ifire"], ["a_refactor","taskweft_perf","ifire"]]}
       ]
     },
     "complete_jellyfish_demo": {
