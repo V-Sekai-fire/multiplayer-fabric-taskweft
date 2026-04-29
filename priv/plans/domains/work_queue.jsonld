@@ -5,7 +5,7 @@
   },
   "@type": "domain:Definition",
   "name": "work_queue",
-  "version": "4.1",
+  "version": "4.2",
   "description": "multiplayer-fabric work queue (2026-04-28). Actions are deterministic. Commands (actions sent to the real world) are probabilistic — MCExecutor models failure with a per-run failure_rate. Method alternatives encode genuinely different approaches for complex items, not duration variants. Single entity (ifire), one Saturday per week.",
 
   "scope": "Shared MMOG fabric beneath multiplayer-fabric-xr-dev (VR) and multiplayer-fabric-rpg (RPG): engine assembly, zone networking, and interest management.",
@@ -101,7 +101,12 @@
         "all_mires":      0,
         "entity_slots":   0,
         "tick_rate":      0,
-        "clean_shutdown": 0
+        "clean_shutdown": 0,
+        "lasso_query_returns_poi": 0,
+        "call_gui_input_fires":    0,
+        "btn_pressed_fires":       0,
+        "virtual_input_fires":     0,
+        "slider_value_changes":    0
       }
     },
     {
@@ -221,11 +226,11 @@
       ]
     },
     "complete_vr_interaction": {
-      "description": "C=4 (3 open blockers). Two approaches: direct integration OR prototype lasso-only first then add canvas_plane. MCExecutor failure_rate models test row failures.",
+      "description": "C=4. OBJECTIVE: interaction-system addon working in interaction-system-project on Meta XR Simulator. Pass = all 5 test rows GREEN in test_interaction_ui.gd (lasso_query_returns_poi, call_gui_input_fires, btn_pressed_fires, virtual_input_fires, slider_value_changes). Blockers: (1) .godot/ cache missing — run godot --import to populate Canvas3D global class; (2) canvas_plane parse cascade unblocked by (1); (3) direct_interaction_action.gd call_gui_input routing not wired end-to-end. Two approaches: direct OR prototype lasso-only first.",
       "alternatives": [
-        {"name": "done",             "check": [{"pointer": "/phase/vr_interaction", "eq": 3}], "subtasks": []},
-        {"name": "direct",           "subtasks": [["complete_openxr_simulator"], ["a_stub","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_refactor","vr_interaction","ifire"]]},
-        {"name": "prototype_first",  "subtasks": [["complete_openxr_simulator"], ["a_set_prototype_first","vr_interaction"], ["a_stub","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_refactor","vr_interaction","ifire"]]}
+        {"name": "done",            "check": [{"pointer": "/phase/vr_interaction", "eq": 3}], "subtasks": []},
+        {"name": "direct",          "subtasks": [["complete_openxr_simulator"], ["a_stub","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_refactor","vr_interaction","ifire"], ["a_verify_pass","lasso_query_returns_poi","ifire"], ["a_verify_pass","call_gui_input_fires","ifire"], ["a_verify_pass","btn_pressed_fires","ifire"], ["a_verify_pass","virtual_input_fires","ifire"], ["a_verify_pass","slider_value_changes","ifire"]]},
+        {"name": "prototype_first", "subtasks": [["complete_openxr_simulator"], ["a_set_prototype_first","vr_interaction"], ["a_stub","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_refactor","vr_interaction","ifire"], ["a_verify_pass","lasso_query_returns_poi","ifire"], ["a_verify_pass","call_gui_input_fires","ifire"], ["a_verify_pass","btn_pressed_fires","ifire"], ["a_verify_pass","virtual_input_fires","ifire"], ["a_verify_pass","slider_value_changes","ifire"]]}
       ]
     },
     "complete_pcvr_player": {
