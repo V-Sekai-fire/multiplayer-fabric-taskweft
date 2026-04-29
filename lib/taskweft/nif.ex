@@ -33,4 +33,7 @@ defmodule Taskweft.NIF do
   def bridge_state_bindings(_state_json, _domain, _category), do: :erlang.nif_error(:not_loaded)
 
   def mc_execute(_domain_json, _plan_json, _probs_json, _seed), do: :erlang.nif_error(:not_loaded)
+
+  def domain_cache_clear(), do: :erlang.nif_error(:not_loaded)
+  def rebac_cache_clear(), do: :erlang.nif_error(:not_loaded)
 end

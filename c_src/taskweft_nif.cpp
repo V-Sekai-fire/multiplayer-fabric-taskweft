@@ -8,9 +8,68 @@
 #include "tw_replan.hpp"
 #include "tw_temporal.hpp"
 
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+// ── Domain parse cache ────────────────────────────────────────────────────────
+// load_json is pure: same JSON → same TwLoaded. The cache lets repeated
+// plan/replan/check_temporal calls for the same domain skip the ~10–15 µs
+// JSON-LD parse. Each retrieval deep-copies the initial state so every planner
+// invocation starts from a clean slate; domain methods and task list are shared
+// (read-only during planning).
+//
+// Formally justified by Planner.DomainCache: plan_cache_equiv proves that
+// planning with a cached parsed domain is observationally equivalent to
+// re-parsing on each call.
+static std::mutex s_cache_mtx;
+static std::unordered_map<std::string, TwLoader::TwLoaded> s_domain_cache;
+
+static TwLoader::TwLoaded load_cached(const std::string &json) {
+    {
+        std::lock_guard<std::mutex> lk(s_cache_mtx);
+        auto it = s_domain_cache.find(json);
+        if (it != s_domain_cache.end()) {
+            TwLoader::TwLoaded result = it->second;
+            result.state = it->second.state->copy(); // fresh initial state
+            return result;
+        }
+    }
+    // Parse outside the lock — concurrent misses are safe (last write wins).
+    TwLoader::TwLoaded loaded = TwLoader::load_json(json);
+    {
+        std::lock_guard<std::mutex> lk(s_cache_mtx);
+        s_domain_cache.emplace(json, loaded);
+    }
+    TwLoader::TwLoaded result = loaded;
+    result.state = loaded.state->copy();
+    return result;
+}
+
+// ── ReBAC graph parse cache ───────────────────────────────────────────────────
+// graph_from_json is pure and graphs are read-only after construction, so a
+// single cached copy is shared across all concurrent readers with no locking
+// during the hot path.  Formally justified by Planner.ExpandIndex:
+// expand_index_equiv proves the member_edges index gives the same result as
+// scanning all edges.
+static std::mutex s_graph_cache_mtx;
+static std::unordered_map<std::string, TwReBAC::TwReBACGraph> s_graph_cache;
+
+static const TwReBAC::TwReBACGraph &graph_cached(const std::string &json) {
+    {
+        std::lock_guard<std::mutex> lk(s_graph_cache_mtx);
+        auto it = s_graph_cache.find(json);
+        if (it != s_graph_cache.end())
+            return it->second;
+    }
+    // Parse outside the lock; concurrent misses produce the same graph.
+    TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(json);
+    std::lock_guard<std::mutex> lk(s_graph_cache_mtx);
+    // try_emplace: if another thread already inserted, keep theirs and discard ours.
+    return s_graph_cache.try_emplace(json, std::move(g)).first->second;
+}
 
 // Parse a plan JSON array ([[name, arg...], ...]) back to vector<TwCall>.
 static std::vector<TwCall> parse_plan(const std::string &p_plan_json) {
@@ -37,7 +96,7 @@ static std::vector<TwCall> parse_plan(const std::string &p_plan_json) {
 // domain_json is a self-contained JSON-LD document with variables + tasks.
 // Raises ErlangError on failure or no-plan.
 std::string plan(ErlNifEnv *p_env, std::string p_domain_json) {
-	TwLoader::TwLoaded loaded = TwLoader::load_json(p_domain_json);
+	TwLoader::TwLoaded loaded = load_cached(p_domain_json);
 	if (!loaded.state) {
 		throw std::runtime_error("failed_to_load_domain");
 	}
@@ -53,7 +112,7 @@ FINE_NIF(plan, 0);
 // fail_step: 0-based index of the failed action, or -1 to auto-detect.
 std::string replan(ErlNifEnv *p_env, std::string p_domain_json,
 		std::string p_plan_json, int64_t p_fail_step) {
-	TwLoader::TwLoaded loaded = TwLoader::load_json(p_domain_json);
+	TwLoader::TwLoaded loaded = load_cached(p_domain_json);
 	if (!loaded.state) {
 		throw std::runtime_error("failed_to_load_domain");
 	}
@@ -72,7 +131,7 @@ FINE_NIF(replan, 0);
 // origin_iso: ISO 8601 duration for the plan start offset, e.g. "PT0S".
 std::string check_temporal(ErlNifEnv *p_env, std::string p_domain_json,
 		std::string p_plan_json, std::string p_origin_iso) {
-	TwLoader::TwLoaded loaded = TwLoader::load_json(p_domain_json);
+	TwLoader::TwLoaded loaded = load_cached(p_domain_json);
 	if (!loaded.state) {
 		throw std::runtime_error("failed_to_load_domain");
 	}
@@ -81,6 +140,15 @@ std::string check_temporal(ErlNifEnv *p_env, std::string p_domain_json,
 	return tw_temporal_to_json(plan_vec, tr, TwLoader::plan_to_json(plan_vec));
 }
 FINE_NIF(check_temporal, 0);
+
+// domain_cache_clear() → :ok
+// Evicts all cached parsed domains. Call when domain JSON will not be reused.
+std::string domain_cache_clear(ErlNifEnv *p_env) {
+	std::lock_guard<std::mutex> lk(s_cache_mtx);
+	s_domain_cache.clear();
+	return "ok";
+}
+FINE_NIF(domain_cache_clear, 0);
 
 
 // rebac_add_edge(graph_json, subj, obj, rel) → graph_json
@@ -98,8 +166,8 @@ FINE_NIF(rebac_add_edge, 0);
 bool rebac_check(ErlNifEnv *p_env, std::string p_graph_json,
 		std::string p_subj, std::string p_expr_json,
 		std::string p_obj, int64_t p_fuel) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
-	TwValue expr = TwLoader::parse_json_str(p_expr_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
+	TwValue expr = TwJson::parse_json_str(p_expr_json);
 	return TwReBAC::check_expr(g, p_subj, expr, p_obj, static_cast<int>(p_fuel));
 }
 FINE_NIF(rebac_check, 0);
@@ -108,7 +176,7 @@ FINE_NIF(rebac_check, 0);
 // All subjects that hold rel to obj (direct + IS_MEMBER_OF transitive).
 std::vector<std::string> rebac_expand(ErlNifEnv *p_env, std::string p_graph_json,
 		std::string p_rel, std::string p_obj, int64_t p_fuel) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
 	return TwReBAC::tw_expand(g, p_rel, p_obj, static_cast<int>(p_fuel));
 }
 FINE_NIF(rebac_expand, 0);
@@ -157,7 +225,7 @@ FINE_NIF(bridge_state_bindings, 0);
 // DFS traversal: terminal via HAS_CAPABILITY, CONTROLS, OWNS.
 std::string rebac_can(ErlNifEnv *p_env, std::string p_graph_json,
 		std::string p_subj, std::string p_capability, int64_t p_max_depth) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
 	return TwReBAC::rebac_can_json(g, p_subj, p_capability, static_cast<int>(p_max_depth));
 }
 FINE_NIF(rebac_can, 0);
@@ -165,7 +233,7 @@ FINE_NIF(rebac_can, 0);
 // rebac_get_entity_capabilities(graph_json, entity) → list of capability strings
 std::vector<std::string> rebac_get_entity_capabilities(ErlNifEnv *p_env,
 		std::string p_graph_json, std::string p_entity) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
 	return TwReBAC::get_entity_capabilities(g, p_entity);
 }
 FINE_NIF(rebac_get_entity_capabilities, 0);
@@ -173,7 +241,7 @@ FINE_NIF(rebac_get_entity_capabilities, 0);
 // rebac_get_entities_with_capability(graph_json, capability) → list of entity strings
 std::vector<std::string> rebac_get_entities_with_capability(ErlNifEnv *p_env,
 		std::string p_graph_json, std::string p_capability) {
-	TwReBAC::TwReBACGraph g = TwReBAC::graph_from_json(p_graph_json);
+	const TwReBAC::TwReBACGraph &g = graph_cached(p_graph_json);
 	return TwReBAC::get_entities_with_capability(g, p_capability);
 }
 FINE_NIF(rebac_get_entities_with_capability, 0);
@@ -185,5 +253,14 @@ std::string mc_execute(ErlNifEnv *p_env, std::string p_domain_json,
 	return TwMCExecutor::mc_execute(p_domain_json, p_plan_json, p_probs_json, p_seed);
 }
 FINE_NIF(mc_execute, 0);
+
+// rebac_cache_clear() → "ok"
+// Evict all cached ReBAC graphs. Call when graphs will not be reused.
+std::string rebac_cache_clear(ErlNifEnv *p_env) {
+	std::lock_guard<std::mutex> lk(s_graph_cache_mtx);
+	s_graph_cache.clear();
+	return "ok";
+}
+FINE_NIF(rebac_cache_clear, 0);
 
 FINE_INIT("Elixir.Taskweft.NIF");

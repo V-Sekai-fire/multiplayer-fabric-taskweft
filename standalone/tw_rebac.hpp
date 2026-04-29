@@ -65,6 +65,10 @@ struct TwReBACGraph {
 	std::unordered_map<std::string, std::vector<size_t>> subj_idx;
 	// object → edge indices
 	std::unordered_map<std::string, std::vector<size_t>> obj_idx;
+	// IS_MEMBER_OF edge indices — avoids O(n) full scan in tw_expand.
+	// Formally justified by Planner.ExpandIndex: expand_index_equiv proves
+	// that iterating member_edges gives the same result as scanning all edges.
+	std::vector<size_t> member_edges;
 	// named computed relation definitions (stored as TwValue)
 	std::unordered_map<std::string, TwValue> definitions;
 
@@ -73,6 +77,8 @@ struct TwReBACGraph {
 		edges.push_back({p_subj, p_obj, parse_rel(p_rel_str), p_rel_str});
 		subj_idx[p_subj].push_back(idx);
 		obj_idx[p_obj].push_back(idx);
+		if (edges.back().rel == RelationType::IS_MEMBER_OF)
+			member_edges.push_back(idx);
 	}
 
 	// Overload for enum-typed callers (used internally).
@@ -239,16 +245,15 @@ inline std::vector<std::string> tw_expand(const TwReBACGraph &p_g,
 		}
 	}
 
-	// IS_MEMBER_OF inheritance
+	// IS_MEMBER_OF inheritance — O(members) via member_edges index, not O(all edges).
 	if (p_fuel > 0) {
-		for (const TwEdge &e : p_g.edges) {
-			if (e.rel == RelationType::IS_MEMBER_OF) {
-				TwValue::Dict m;
-				m["type"] = TwValue(std::string("base"));
-				m["rel"]  = TwValue(rel_str(rel));
-				if (check_expr(p_g, e.object, TwValue(std::move(m)), p_obj, p_fuel)) {
-					result.insert(e.subject);
-				}
+		for (size_t idx : p_g.member_edges) {
+			const TwEdge &e = p_g.edges[idx];
+			TwValue::Dict m;
+			m["type"] = TwValue(std::string("base"));
+			m["rel"]  = TwValue(p_rel_str);
+			if (check_expr(p_g, e.object, TwValue(std::move(m)), p_obj, p_fuel)) {
+				result.insert(e.subject);
 			}
 		}
 	}
