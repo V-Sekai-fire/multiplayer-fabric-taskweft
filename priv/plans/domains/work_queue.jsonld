@@ -82,11 +82,17 @@
         "zone_border_handoff":3,
         "taskweft_lean_proofs":3,
         "taskweft_perf":      3,
-        "openxr_simulator":   1, "isolated_submodule": 0, "vr_interaction":     0,
+        "openxr_simulator":   3, "isolated_submodule": 0,
+        "vr_import_cache":    3,
+        "vr_lasso_test":      0, "vr_lasso_s2h":       0,
+        "vr_lasso_poi_reg":   0, "vr_lasso_query_pass":0,
+        "vr_call_gui_routing":0,
+        "vr_btn_pressed":     0, "vr_slider_value":    0,
         "zone_manifest":      0, "concert_archetype":  0, "ragdoll_archetype":  0,
         "pcvr_player":        0, "sandbox_rebac":      0, "artifactsmmog_bot":  0,
         "convoy_chokepoint":  0, "jellyfish_demo":     0, "headless_observer":  0,
-        "headless_matrix":    0, "otel_tracing":       0, "turboquant_llm":     0,
+        "headless_matrix":    0, "otel_tracing":       0, "godot_otel_module":  3,
+        "turboquant_llm":     0,
         "gepa_cycle":         0
       }
     },
@@ -137,7 +143,7 @@
       "name": "approach",
       "description": "Chosen implementation approach for complex items. Set by method selection.",
       "init": {
-        "vr_interaction":   0,
+        "vr_lasso_test":     0,
         "sandbox_rebac":    0,
         "turboquant_llm":   0,
         "convoy_chokepoint":0,
@@ -210,7 +216,7 @@
     }
   },
   "methods": {
-    "xr_dev_track":   {"alternatives": [{"name": "run", "subtasks": [["complete_openxr_simulator"], ["complete_vr_interaction"]]}]},
+    "xr_dev_track":   {"alternatives": [{"name": "run", "subtasks": [["complete_openxr_simulator"], ["complete_vr_import_cache"], ["complete_vr_lasso_test"], ["complete_vr_lasso_s2h"], ["complete_vr_lasso_poi_reg"], ["complete_vr_lasso_query_pass"], ["complete_vr_call_gui_routing"], ["complete_vr_btn_pressed"], ["complete_vr_slider_value"]]}]},
     "mmog_dev_track": {"alternatives": [{"name": "run", "subtasks": [["complete_pcvr_player"]]}]},
     "demo_dev_track": {"alternatives": [{"name": "run", "subtasks": [["complete_zone_manifest"], ["complete_sandbox_rebac"], ["complete_jellyfish_demo"]]}]},
     "ci_dev_track":   {"alternatives": [{"name": "run", "subtasks": [["complete_isolated_submodule"], ["complete_headless_observer"], ["complete_headless_matrix"]]}]},
@@ -225,12 +231,59 @@
         {"name": "direct",           "subtasks": [["a_stub","openxr_simulator","ifire"], ["a_green","openxr_simulator","ifire"], ["a_refactor","openxr_simulator","ifire"]]}
       ]
     },
-    "complete_vr_interaction": {
-      "description": "C=4. OBJECTIVE: interaction-system addon working in interaction-system-project on Meta XR Simulator. Pass = all 5 test rows GREEN in test_interaction_ui.gd (lasso_query_returns_poi, call_gui_input_fires, btn_pressed_fires, virtual_input_fires, slider_value_changes). Blockers: (1) .godot/ cache missing — run godot --import to populate Canvas3D global class; (2) canvas_plane parse cascade unblocked by (1); (3) direct_interaction_action.gd call_gui_input routing not wired end-to-end. Two approaches: direct OR prototype lasso-only first.",
+    "complete_vr_import_cache": {
+      "description": "C=1. Run godot --headless --import to populate .godot/ cache and register Canvas3D global class. Done 2026-04-29.",
       "alternatives": [
-        {"name": "done",            "check": [{"pointer": "/phase/vr_interaction", "eq": 3}], "subtasks": []},
-        {"name": "direct",          "subtasks": [["complete_openxr_simulator"], ["a_stub","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_refactor","vr_interaction","ifire"], ["a_verify_pass","lasso_query_returns_poi","ifire"], ["a_verify_pass","call_gui_input_fires","ifire"], ["a_verify_pass","btn_pressed_fires","ifire"], ["a_verify_pass","virtual_input_fires","ifire"], ["a_verify_pass","slider_value_changes","ifire"]]},
-        {"name": "prototype_first", "subtasks": [["complete_openxr_simulator"], ["a_set_prototype_first","vr_interaction"], ["a_stub","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_green","vr_interaction","ifire"], ["a_refactor","vr_interaction","ifire"], ["a_verify_pass","lasso_query_returns_poi","ifire"], ["a_verify_pass","call_gui_input_fires","ifire"], ["a_verify_pass","btn_pressed_fires","ifire"], ["a_verify_pass","virtual_input_fires","ifire"], ["a_verify_pass","slider_value_changes","ifire"]]}
+        {"name": "done", "check": [{"pointer": "/phase/vr_import_cache", "eq": 3}], "subtasks": []}
+      ]
+    },
+    "complete_vr_lasso_test": {
+      "description": "C=2. Replace addon-existence stub in test_interaction_ui.gd tests 5-6 with a real failing assertion: instantiate a LassoQuery, register a dummy POI, call lassodb.query(), assert out_best_poi is not null.",
+      "alternatives": [
+        {"name": "done",   "check": [{"pointer": "/phase/vr_lasso_test", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["complete_vr_import_cache"], ["a_stub","vr_lasso_test","ifire"], ["a_green","vr_lasso_test","ifire"], ["a_refactor","vr_lasso_test","ifire"]]}
+      ]
+    },
+    "complete_vr_lasso_s2h": {
+      "description": "C=2. Add lasso state (best POI name, euclidean dist, angular dist) as shader params to debug_sky.gdshader via s2h so the query is observable without the 2D UI stack. Updated each frame from interaction_action.on_pose_changed().",
+      "alternatives": [
+        {"name": "done",   "check": [{"pointer": "/phase/vr_lasso_s2h", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["complete_vr_lasso_test"], ["a_stub","vr_lasso_s2h","ifire"], ["a_green","vr_lasso_s2h","ifire"], ["a_refactor","vr_lasso_s2h","ifire"]]}
+      ]
+    },
+    "complete_vr_lasso_poi_reg": {
+      "description": "C=3. canvas_3d_anchor nodes correctly register POIs with lassodb on _ready and deregister on exit. Verify via s2h HUD that POI count > 0 when scene is live.",
+      "alternatives": [
+        {"name": "done",   "check": [{"pointer": "/phase/vr_lasso_poi_reg", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["complete_vr_lasso_s2h"], ["a_stub","vr_lasso_poi_reg","ifire"], ["a_green","vr_lasso_poi_reg","ifire"], ["a_refactor","vr_lasso_poi_reg","ifire"]]}
+      ]
+    },
+    "complete_vr_lasso_query_pass": {
+      "description": "C=4. Coordinate math correct across all 4 spaces (screen→world→source→canvas2D). Query returns correct POI. lasso_query_returns_poi test goes green. BORKEN_get_origin_pos is the scar from last attempt — AABB coordinate math in get_origin_transformed_pos() is the likely fix site.",
+      "alternatives": [
+        {"name": "done",   "check": [{"pointer": "/phase/vr_lasso_query_pass", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["complete_vr_lasso_poi_reg"], ["a_stub","vr_lasso_query_pass","ifire"], ["a_green","vr_lasso_query_pass","ifire"], ["a_refactor","vr_lasso_query_pass","ifire"], ["a_verify_pass","lasso_query_returns_poi","ifire"]]}
+      ]
+    },
+    "complete_vr_call_gui_routing": {
+      "description": "C=4. Wire direct_interaction_action.gd call_gui_input routing end-to-end so call_gui_input_fires and virtual_input_fires pass. Blocker: call_gui_input not connected to Control signal path.",
+      "alternatives": [
+        {"name": "done",   "check": [{"pointer": "/phase/vr_call_gui_routing", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["complete_vr_lasso_query_pass"], ["a_stub","vr_call_gui_routing","ifire"], ["a_green","vr_call_gui_routing","ifire"], ["a_refactor","vr_call_gui_routing","ifire"], ["a_verify_pass","call_gui_input_fires","ifire"], ["a_verify_pass","virtual_input_fires","ifire"]]}
+      ]
+    },
+    "complete_vr_btn_pressed": {
+      "description": "C=3. Button press events routed through call_gui_input so btn_pressed_fires passes. Requires call_gui_input routing done.",
+      "alternatives": [
+        {"name": "done",   "check": [{"pointer": "/phase/vr_btn_pressed", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["complete_vr_call_gui_routing"], ["a_stub","vr_btn_pressed","ifire"], ["a_green","vr_btn_pressed","ifire"], ["a_refactor","vr_btn_pressed","ifire"], ["a_verify_pass","btn_pressed_fires","ifire"]]}
+      ]
+    },
+    "complete_vr_slider_value": {
+      "description": "C=3. Slider input routed through call_gui_input so slider_value_changes passes. Requires btn_pressed done.",
+      "alternatives": [
+        {"name": "done",   "check": [{"pointer": "/phase/vr_slider_value", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["complete_vr_btn_pressed"], ["a_stub","vr_slider_value","ifire"], ["a_green","vr_slider_value","ifire"], ["a_refactor","vr_slider_value","ifire"], ["a_verify_pass","slider_value_changes","ifire"]]}
       ]
     },
     "complete_pcvr_player": {
@@ -287,7 +340,7 @@
       "description": "C=7 (wiring proven components). One approach: wire all deps then integrate. MCExecutor failure_rate models pass-condition failures.",
       "alternatives": [
         {"name": "done",   "check": [{"pointer": "/phase/jellyfish_demo", "eq": 3}], "subtasks": []},
-        {"name": "direct", "subtasks": [["complete_vr_interaction"], ["complete_pcvr_player"], ["complete_sandbox_rebac"], ["a_stub","jellyfish_demo","ifire"], ["a_green","jellyfish_demo","ifire"], ["a_refactor","jellyfish_demo","ifire"]]}
+        {"name": "direct", "subtasks": [["complete_vr_slider_value"], ["complete_pcvr_player"], ["complete_sandbox_rebac"], ["a_stub","jellyfish_demo","ifire"], ["a_green","jellyfish_demo","ifire"], ["a_refactor","jellyfish_demo","ifire"]]}
       ]
     },
     "complete_isolated_submodule": {
@@ -356,11 +409,18 @@
         {"name": "convoy_first",  "subtasks": [["a_set_prototype_first","convoy_chokepoint"], ["a_stub","convoy_chokepoint","ifire"], ["a_green","convoy_chokepoint","ifire"], ["a_green","convoy_chokepoint","ifire"], ["a_refactor","convoy_chokepoint","ifire"]]}
       ]
     },
+    "complete_godot_otel_module": {
+      "description": "C=5. Wire the opentelemetry-godot engine module (OTel GDExtension/module) into multiplayer-fabric-godot so spans can be emitted from GDScript and C++ zones. One approach: enable module in SCons build, verify --test --test-case='*OTel*' exits 0, confirm OTLP HTTP export reaches a local collector. MCExecutor failure_rate models build flag or OTLP endpoint misconfiguration.",
+      "alternatives": [
+        {"name": "done",   "check": [{"pointer": "/phase/godot_otel_module", "eq": 3}], "subtasks": []},
+        {"name": "direct", "subtasks": [["a_stub","godot_otel_module","ifire"], ["a_green","godot_otel_module","ifire"], ["a_refactor","godot_otel_module","ifire"]]}
+      ]
+    },
     "complete_otel_tracing": {
-      "description": "C=6. One approach: stub spans at zone connect and packet parse.",
+      "description": "C=6. One approach: stub spans at zone connect and packet parse. Requires godot_otel_module done so the OTel API is available.",
       "alternatives": [
         {"name": "done",   "check": [{"pointer": "/phase/otel_tracing", "eq": 3}], "subtasks": []},
-        {"name": "direct", "subtasks": [["a_stub","otel_tracing","ifire"], ["a_green","otel_tracing","ifire"], ["a_refactor","otel_tracing","ifire"]]}
+        {"name": "direct", "subtasks": [["complete_godot_otel_module"], ["a_stub","otel_tracing","ifire"], ["a_green","otel_tracing","ifire"], ["a_refactor","otel_tracing","ifire"]]}
       ]
     },
 
