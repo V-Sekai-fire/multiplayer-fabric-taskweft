@@ -200,8 +200,18 @@ defmodule Taskweft.CLI do
 
   defp read_domain_file(path) do
     case File.read(path) do
-      {:ok, body} -> {:ok, body}
-      {:error, _reason} -> {:error, "taskweft: cannot read #{path}", 1}
+      {:ok, body} ->
+        if String.ends_with?(path, ".ex") do
+          case Taskweft.DSL.compile(body) do
+            {:ok, json} -> {:ok, json}
+            {:error, reason} -> {:error, "taskweft: DSL compile error: #{reason}", 1}
+          end
+        else
+          {:ok, body}
+        end
+
+      {:error, _reason} ->
+        {:error, "taskweft: cannot read #{path}", 1}
     end
   end
 

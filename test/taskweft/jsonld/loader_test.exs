@@ -399,7 +399,12 @@ defmodule Taskweft.JSONLD.LoaderTest do
   # "no_plan", as the existing CLI planner tests do).
   describe "multigoal plans soundly through the NIF" do
     setup do
-      domain = read_json(Path.join([@plans, "domains", "blocks_world.jsonld"]))
+      {:ok, domain_json} =
+        Path.join([@plans, "domains", "blocks_world_dsl.ex"])
+        |> File.read!()
+        |> Taskweft.DSL.compile()
+
+      domain = Jason.decode!(domain_json)
       problem = read_json(Path.join([@plans, "problems", "blocks_world_multigoal.jsonld"]))
       {:ok, merged: Jason.encode!(merge(domain, problem))}
     end
@@ -425,7 +430,12 @@ defmodule Taskweft.JSONLD.LoaderTest do
   # already-correct merge_tasks path.
   describe "goal-methods are directly callable as ordinary tasks" do
     setup do
-      {:ok, domain: read_json(Path.join([@plans, "domains", "blocks_world.jsonld"]))}
+      {:ok, domain_json} =
+        Path.join([@plans, "domains", "blocks_world_dsl.ex"])
+        |> File.read!()
+        |> Taskweft.DSL.compile()
+
+      {:ok, domain: Jason.decode!(domain_json)}
     end
 
     test "two different goals produce two genuinely different plans", %{domain: domain} do
