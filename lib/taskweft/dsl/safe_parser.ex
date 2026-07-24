@@ -223,6 +223,7 @@ defmodule Taskweft.DSL.SafeParser do
 
   defp expr_to_json(true), do: true
   defp expr_to_json(false), do: false
+  defp expr_to_json({:__aliases__, _, [name]}), do: to_string(name)
   defp expr_to_json(atom) when is_atom(atom), do: to_string(atom)
   defp expr_to_json(bin) when is_binary(bin), do: bin
   defp expr_to_json(num) when is_number(num), do: num
