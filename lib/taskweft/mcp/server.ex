@@ -59,9 +59,9 @@ defmodule Taskweft.MCP.Server do
            {:ok, validated} <- validate_domain(domain_dsl),
            explain = Map.get(args, :explain, false),
            {:ok, result} <- do_plan(validated, explain) do
-        {:ok, %{content: result}}
+        {:ok, tool_text(result)}
       else
-        {:error, reason} -> {:ok, %{content: encode_error(reason)}}
+        {:error, reason} -> {:ok, tool_error(reason)}
       end
     end)
   end
@@ -95,9 +95,9 @@ defmodule Taskweft.MCP.Server do
            {:ok, plan_str} <- fetch_param(args, :plan_json),
            fail_step = Map.get(args, :fail_step, -1),
            {:ok, result} <- Taskweft.replan(validated, plan_str, fail_step) do
-        {:ok, %{content: result}}
+        {:ok, tool_text(result)}
       else
-        {:error, reason} -> {:ok, %{content: encode_error(reason)}}
+        {:error, reason} -> {:ok, tool_error(reason)}
       end
     end)
   end
@@ -119,9 +119,9 @@ defmodule Taskweft.MCP.Server do
            {:ok, domain_dsl} <-
              parse_domain_input(raw, Map.get(args, :format, "dsl")),
            {:ok, validated} <- validate_domain(domain_dsl) do
-        {:ok, %{content: validated}}
+        {:ok, tool_text(validated)}
       else
-        {:error, reason} -> {:ok, %{content: encode_error(reason)}}
+        {:error, reason} -> {:ok, tool_error(reason)}
       end
     end)
   end
@@ -166,6 +166,14 @@ defmodule Taskweft.MCP.Server do
       {:ok, nil} -> {:error, "missing required parameter: #{key}"}
       :error -> {:error, "missing required parameter: #{key}"}
     end
+  end
+
+  # MCP content item wrapping — protocol requires content to be an array
+  # of objects with type/text fields, not a bare string.
+  defp tool_text(text), do: %{content: [%{type: "text", text: text}]}
+
+  defp tool_error(reason) do
+    tool_text(encode_error(reason))
   end
 
   # Encode an error reason as safe JSON — never raise, never crash.
