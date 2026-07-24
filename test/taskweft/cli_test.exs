@@ -72,7 +72,7 @@ defmodule Taskweft.CLITest do
     end
 
     test "replan with a non-integer fail step" do
-      assert {:error, msg, 2} = CLI.run(["replan", "x", domain("blocks_world.jsonld")])
+      assert {:error, msg, 2} = CLI.run(["replan", "x", domain("blocks_world_dsl.ex")])
       assert IO.iodata_to_binary(msg) =~ "must be an integer"
     end
 
@@ -85,37 +85,35 @@ defmodule Taskweft.CLITest do
     @describetag :nif
 
     test "plan on a self-contained domain prints a bare JSON step array" do
-      assert {:ok, out} = CLI.run(["plan", domain("blocks_world.jsonld")])
+      assert {:ok, out} = CLI.run(["plan", domain("blocks_world_dsl.ex")])
       {:ok, steps} = out |> IO.iodata_to_binary() |> Jason.decode()
       assert is_list(steps)
       assert Enum.all?(steps, &is_list/1)
     end
 
     test "a bare domain path (no subcommand) is treated as plan" do
-      assert {:ok, bare} = CLI.run([domain("blocks_world.jsonld")])
-      assert {:ok, viaplan} = CLI.run(["plan", domain("blocks_world.jsonld")])
+      assert {:ok, bare} = CLI.run([domain("blocks_world_dsl.ex")])
+      assert {:ok, viaplan} = CLI.run(["plan", domain("blocks_world_dsl.ex")])
       assert IO.iodata_to_binary(bare) == IO.iodata_to_binary(viaplan)
     end
 
     test "replan echoes the original plan (issue #43 shape) and recovers" do
-      assert {:ok, out} = CLI.run(["replan", "0", domain("blocks_world.jsonld")])
+      assert {:ok, out} = CLI.run(["replan", "0", domain("blocks_world_dsl.ex")])
       {:ok, decoded} = out |> IO.iodata_to_binary() |> Jason.decode()
       assert is_list(decoded["original_plan"])
       assert decoded["original_plan"] != []
     end
 
     test "--problem merges the problem's tasks, changing the plan" do
-      # blocks_world_1a fixes a goal that differs from the domain default,
-      # so the merged plan must differ from the domain-only plan.
       assert {:ok, merged} =
                CLI.run([
                  "plan",
                  "--problem",
-                 domain("blocks_world.jsonld"),
+                 domain("blocks_world_dsl.ex"),
                  problem("blocks_world_1a.jsonld")
                ])
 
-      assert {:ok, base} = CLI.run(["plan", domain("blocks_world.jsonld")])
+      assert {:ok, base} = CLI.run(["plan", domain("blocks_world_dsl.ex")])
       assert IO.iodata_to_binary(merged) != IO.iodata_to_binary(base)
     end
   end
