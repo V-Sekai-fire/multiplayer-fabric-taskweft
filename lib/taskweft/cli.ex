@@ -15,7 +15,7 @@ defmodule Taskweft.CLI do
       taskweft plan --problem <domain> <problem>        plan from split domain + problem
       taskweft plan                                     plan from JSON-LD on stdin
       taskweft replan <fail_step> <domain> [problem]    replan after a step failure (JSON)
-      taskweft mcp [--port N] [--host H]                 run the MCP server over HTTP
+      taskweft mcp [--port N] [--host H]                 run the MCP server over HTTP with SSE
       taskweft version                                   print version + build commit
       taskweft help                                      print this usage
 
@@ -171,7 +171,8 @@ defmodule Taskweft.CLI do
     server_opts = [
       transport: :http,
       port: Keyword.get(opts, :port, 4000),
-      host: Keyword.get(opts, :host, "localhost")
+      host: Keyword.get(opts, :host, "localhost"),
+      sse_enabled: true
     ]
 
     {:ok, _server} = Taskweft.MCP.Server.start_link(server_opts)
