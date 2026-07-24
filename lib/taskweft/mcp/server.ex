@@ -82,8 +82,7 @@ defmodule Taskweft.MCP.Server do
     )
 
     param(:plan_json, :string,
-      required: true,
-      description: "JSON string containing the original plan steps array."
+      description: "JSON string containing the original plan steps array.  When omitted, replan falls back to a full plan from the domain."
     )
 
     param(:fail_step, :integer,
@@ -95,10 +94,16 @@ defmodule Taskweft.MCP.Server do
            {:ok, domain_dsl} <-
              parse_domain_input(raw, Map.get(args, :format, "dsl")),
            {:ok, validated} <- validate_domain(domain_dsl),
-           {:ok, plan_str} <- fetch_param(args, :plan_json),
-           fail_step = Map.get(args, :fail_step, -1),
-           {:ok, result} <- Taskweft.replan(validated, plan_str, fail_step) do
-        {:ok, tool_text(result)}
+           fail_step = Map.get(args, :fail_step, -1) do
+        case Map.get(args, :plan_json) do
+          nil ->
+            {:ok, result} = Taskweft.plan(validated)
+            {:ok, tool_text(result)}
+
+          plan_str ->
+            {:ok, result} = Taskweft.replan(validated, plan_str, fail_step)
+            {:ok, tool_text(result)}
+        end
       else
         {:error, reason} -> {:ok, tool_error(reason)}
       end
