@@ -34,6 +34,9 @@ defmodule Taskweft.MCP.Server do
             @todo_list [[:pickup, :a]]
           end
 
+      Note: Elixir requires a space after a keyword colon before an
+      opening bracket — `todo: [type: list]`, not `todo:[type: list]`.
+
       **JSON-LD** (full Linked Data):
 
           {"@context": {...}, "@type": "domain:Definition", "name": "...", ...}
