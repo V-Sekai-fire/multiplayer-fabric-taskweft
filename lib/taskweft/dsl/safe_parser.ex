@@ -39,7 +39,7 @@ defmodule Taskweft.DSL.SafeParser do
       Enum.reduce(attributes, domain, fn attr, acc ->
         unwrapped = unwrap_at(attr)
         {name, _, args} = unwrapped
-        evaluated = Enum.map(args, &eval_node/1)
+        evaluated = Enum.map(args, &ast_to_literal/1)
         handle_attribute({name, [], evaluated}, acc)
       end)
 
@@ -50,22 +50,23 @@ defmodule Taskweft.DSL.SafeParser do
   defp unwrap_at({:@, _, [{name, _, args}]}), do: {name, [], args}
   defp unwrap_at(other), do: other
 
-  # Evaluate an AST node to its runtime value — supports maps, lists,
-  # atoms, strings, numbers, and keyword pairs (the subset the DSL uses).
-  defp eval_node({:%{}, _, pairs}) when is_list(pairs) do
-    Map.new(pairs, fn {k, v} -> {eval_node(k), eval_node(v)} end)
+  # Convert AST literal node to its runtime value — pure pattern matching, no
+  # Code.eval_quoted or function calls.  Handles maps, lists, atoms, strings,
+  # numbers, and module aliases (the subset the DSL uses).
+  defp ast_to_literal({:%{}, _, pairs}) when is_list(pairs) do
+    Map.new(pairs, fn {k, v} -> {ast_to_literal(k), ast_to_literal(v)} end)
   end
 
-  defp eval_node(list) when is_list(list), do: Enum.map(list, &eval_node/1)
+  defp ast_to_literal(list) when is_list(list), do: Enum.map(list, &ast_to_literal/1)
 
-  defp eval_node({key, value}) when is_atom(key), do: {eval_node(key), eval_node(value)}
-  defp eval_node({key, value}), do: {eval_node(key), eval_node(value)}
+  defp ast_to_literal({key, value}) when is_atom(key), do: {ast_to_literal(key), ast_to_literal(value)}
+  defp ast_to_literal({key, value}), do: {ast_to_literal(key), ast_to_literal(value)}
 
-  defp eval_node(atom) when is_atom(atom), do: atom
-  defp eval_node(bin) when is_binary(bin), do: bin
-  defp eval_node(num) when is_number(num), do: num
-  defp eval_node({:__aliases__, _, [name]}), do: name
-  defp eval_node(other), do: other
+  defp ast_to_literal(atom) when is_atom(atom), do: atom
+  defp ast_to_literal(bin) when is_binary(bin), do: bin
+  defp ast_to_literal(num) when is_number(num), do: num
+  defp ast_to_literal({:__aliases__, _, [name]}), do: name
+  defp ast_to_literal(other), do: other
 
   defp handle_attribute({:name, _, [value]}, domain) when is_binary(value) do
     Map.put(domain, "name", value)
