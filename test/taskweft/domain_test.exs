@@ -49,11 +49,23 @@ defmodule Taskweft.DomainTest do
   for {domain_name, problem_name} <- @pairs do
     golden_path = Path.join(@expected_path, "#{domain_name}__#{problem_name}_expected.json")
 
-    d = File.read!(Path.join(@domains_path, "#{domain_name}.jsonld"))
+    dsl_path = Path.join(@domains_path, "#{domain_name}_dsl.ex")
+    jsonld_path = Path.join(@domains_path, "#{domain_name}.jsonld")
+
+    domain_json =
+      if File.exists?(dsl_path) do
+        case File.read!(dsl_path) |> Taskweft.DSL.compile() do
+          {:ok, json} -> json
+          {:error, _reason} -> File.read!(jsonld_path)
+        end
+      else
+        File.read!(jsonld_path)
+      end
+
     p = File.read!(Path.join(@problems_path, "#{problem_name}.jsonld"))
 
     merged =
-      Jason.decode!(d) |> Map.merge(Jason.decode!(p)) |> Jason.encode!()
+      Jason.decode!(domain_json) |> Map.merge(Jason.decode!(p)) |> Jason.encode!()
 
     golden = Jason.decode!(File.read!(golden_path))
 
@@ -86,7 +98,18 @@ defmodule Taskweft.DomainTest do
     golden_path = Path.join(@expected_path, "#{domain_name}_expected.json")
     golden = Jason.decode!(File.read!(golden_path))
 
-    json = File.read!(Path.join(@domains_path, "#{domain_name}.jsonld"))
+    dsl_path = Path.join(@domains_path, "#{domain_name}_dsl.ex")
+    jsonld_path = Path.join(@domains_path, "#{domain_name}.jsonld")
+
+    json =
+      if File.exists?(dsl_path) do
+        case File.read!(dsl_path) |> Taskweft.DSL.compile() do
+          {:ok, json} -> json
+          {:error, _reason} -> File.read!(jsonld_path)
+        end
+      else
+        File.read!(jsonld_path)
+      end
 
     @tag :domain
     test "#{domain_name} (standalone) matches plan and solution tree" do
