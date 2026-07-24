@@ -236,7 +236,7 @@ defmodule Taskweft.DSL.SafeParser do
   # ── Subtasks (todo_list entries) ───────────────────────────────────
   defp subtasks_to_list(list) when is_list(list) do
     Enum.map(list, fn
-      [name | args] when is_atom(name) -> [to_string(name) | Enum.map(args, &to_string/1)]
+      [name | args] when is_atom(name) -> [to_string(name) | Enum.map(args, &arg_to_string/1)]
       other -> other
     end)
   end
@@ -246,7 +246,7 @@ defmodule Taskweft.DSL.SafeParser do
   defp todo_to_list(list) when is_list(list) do
     Enum.map(list, fn
       [name | args] when is_atom(name) ->
-        [to_string(name) | Enum.map(args, &to_string/1)]
+        [to_string(name) | Enum.map(args, &arg_to_string/1)]
 
       {:%{}, _, pairs} ->
         case List.keyfind(pairs, :goal, 0) do
@@ -266,6 +266,14 @@ defmodule Taskweft.DSL.SafeParser do
   end
 
   defp todo_to_list(_), do: []
+
+  # Convert an AST literal to a string for todo/subtask args.
+  # Handles atoms, binaries, numbers, aliased modules, and keyword pairs.
+  defp arg_to_string({:__aliases__, _, [name]}), do: to_string(name)
+  defp arg_to_string({key, value}) when is_atom(key), do: "#{key}: #{arg_to_string(value)}"
+  defp arg_to_string(atom) when is_atom(atom), do: to_string(atom)
+  defp arg_to_string(bin) when is_binary(bin), do: bin
+  defp arg_to_string(num) when is_number(num), do: to_string(num)
 
   # ── Goal bindings ──────────────────────────────────────────────────
   defp goal_to_list(list) when is_list(list) do
