@@ -101,12 +101,11 @@ defmodule Taskweft.MCP.IntegrationTest do
   end
 
   describe "list_tools" do
-    test "exposes plan, replan, and validate tools", %{client: client} do
+    test "exposes plan and validate tools", %{client: client} do
       {:ok, tools} = Client.list_tools(client)
       names = Enum.map(tools, &(&1[:name] || Map.get(&1, "name")))
 
       assert "plan" in names
-      assert "replan" in names
       assert "validate" in names
     end
   end

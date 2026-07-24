@@ -5,7 +5,7 @@ defmodule Taskweft.MCP.Server do
   @moduledoc """
   MCP server for Taskweft.
 
-  RECTGTN HTN planner exposed as MCP tools (`plan`, `replan`, `validate`).
+  RECTGTN HTN planner exposed as MCP tools (`plan`, `validate`).
 
   ## Two call paths
 
@@ -55,39 +55,13 @@ defmodule Taskweft.MCP.Server do
       description: "If true, include explain tree in the plan response"
     )
 
-    handle(fn args, _state ->
-      with {:ok, raw} <- fetch_param(args, :domain_dsl),
-           {:ok, domain_dsl} <-
-             parse_domain_input(raw, Map.get(args, :format, "dsl")),
-           {:ok, validated} <- validate_domain(domain_dsl),
-           explain = Map.get(args, :explain, false),
-           {:ok, result} <- do_plan(validated, explain) do
-        {:ok, tool_text(result)}
-      else
-        {:error, reason} -> {:ok, tool_error(reason)}
-      end
-    end)
-  end
-
-  tool "replan",
-       "Replan after a step failure. Same interface as plan, but accepts a failed step index." do
-    param(:domain_dsl, :string,
-      required: true,
-      description: "A RECTGTN HTN domain in Elixir DSL or JSON-LD format."
-    )
-
-    param(:format, :string,
-      default: "dsl",
-      description: "Parse format - 'dsl' for Elixir DSL or 'json' for JSON-LD"
-    )
-
     param(:plan_json, :string,
-      required: true,
-      description: "JSON string containing the original plan steps array."
+      description:
+        "JSON string containing the original plan steps array.  When set, replans from a failure step instead of doing a fresh plan."
     )
 
     param(:fail_step, :integer,
-      description: "Step index to replan from (0-based, defaults to full replan if omitted)."
+      description: "Step index to replan from (0-based, requires plan_json; ignored otherwise)."
     )
 
     handle(fn args, _state ->
@@ -95,10 +69,17 @@ defmodule Taskweft.MCP.Server do
            {:ok, domain_dsl} <-
              parse_domain_input(raw, Map.get(args, :format, "dsl")),
            {:ok, validated} <- validate_domain(domain_dsl),
-           {:ok, plan_str} <- fetch_param(args, :plan_json),
-           fail_step = Map.get(args, :fail_step, -1),
-           {:ok, result} <- Taskweft.replan(validated, plan_str, fail_step) do
-        {:ok, tool_text(result)}
+           explain = Map.get(args, :explain, false) do
+        case Map.get(args, :plan_json) do
+          nil ->
+            {:ok, result} = do_plan(validated, explain)
+            {:ok, tool_text(result)}
+
+          plan_str ->
+            fail_step = Map.get(args, :fail_step, -1)
+            {:ok, result} = Taskweft.replan(validated, plan_str, fail_step)
+            {:ok, tool_text(result)}
+        end
       else
         {:error, reason} -> {:ok, tool_error(reason)}
       end
