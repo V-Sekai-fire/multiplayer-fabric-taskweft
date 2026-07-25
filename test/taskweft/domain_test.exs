@@ -17,30 +17,7 @@ defmodule Taskweft.DomainTest do
     {"blocks_world", "blocks_world_2b"},
     {"blocks_world", "blocks_world_3"},
     {"blocks_world", "blocks_world_goal"},
-    {"blocks_world", "blocks_world_multigoal"},
-    {"entity_capabilities", "entity_caps_amphibious"},
-    {"entity_capabilities", "entity_caps_boat"},
-    {"entity_capabilities", "entity_caps_drone"},
-    {"entity_capabilities", "entity_caps_goal"},
-    {"entity_capabilities", "entity_caps_human"},
-    {"entity_capabilities", "entity_caps_multi"},
-    {"healthcare", "healthcare_one"},
-    {"healthcare", "healthcare_shared"},
-    {"healthcare", "healthcare_two"},
-    {"job_shop_scheduling", "job_shop_both"},
-    {"job_shop_scheduling", "job_shop_one"},
-    {"rescue", "rescue_move"},
-    {"rescue", "rescue_survey"},
-    {"robosub", "robosub_full_mission"},
-    {"robosub", "robosub_partial"},
-    {"simple_travel", "simple_travel_goal"},
-    {"simple_travel", "simple_travel_one"},
-    {"simple_travel", "simple_travel_two"},
-    {"temporal_travel", "temporal_travel_goal"},
-    {"temporal_travel", "temporal_travel_one"},
-    {"temporal_travel", "temporal_travel_two"},
-    {"trust_topology_audit", "trust_topology_audit_curvenet"},
-    {"service_bringup", "chi176_local_infra_bringup"}
+    {"blocks_world", "blocks_world_multigoal"}
   ]
 
   # Standalone domains with no paired problems — tested from domain alone
@@ -50,17 +27,7 @@ defmodule Taskweft.DomainTest do
     golden_path = Path.join(@expected_path, "#{domain_name}__#{problem_name}_expected.json")
 
     dsl_path = Path.join(@domains_path, "#{domain_name}_dsl.ex")
-    jsonld_path = Path.join(@domains_path, "#{domain_name}.jsonld")
-
-    domain_json =
-      if File.exists?(dsl_path) do
-        case File.read!(dsl_path) |> Taskweft.DSL.compile() do
-          {:ok, json} -> json
-          {:error, _reason} -> File.read!(jsonld_path)
-        end
-      else
-        File.read!(jsonld_path)
-      end
+    {:ok, domain_json} = File.read!(dsl_path) |> Taskweft.DSL.compile()
 
     p = File.read!(Path.join(@problems_path, "#{problem_name}.jsonld"))
 

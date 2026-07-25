@@ -361,7 +361,7 @@ defmodule Taskweft.JSONLD.LoaderTest do
 
     test "adds an actionable hint when a resource URI is passed instead of JSON content" do
       assert {:error, msg} =
-               Loader.load_string("taskweft://domains/entity_capabilities.jsonld")
+               Loader.load_string("taskweft://domains/blocks_world.jsonld")
 
       assert msg =~ "invalid JSON"
       assert msg =~ "looks like a URI"
