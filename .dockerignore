@@ -5,7 +5,7 @@ erl_crash.dump
 .git/
 .github/
 .elixir_ls/
-deploy/README.md
+DEPLOY.md
 lean/
 cli/
 priv/*.so

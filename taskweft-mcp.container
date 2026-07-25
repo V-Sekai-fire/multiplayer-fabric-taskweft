@@ -1,5 +1,5 @@
 # Podman Quadlet unit for local testing under WSL/systemd.
-# Install: cp deploy/taskweft-mcp.container ~/.config/containers/systemd/
+# Install: cp taskweft-mcp.container ~/.config/containers/systemd/
 #          systemctl --user daemon-reload && systemctl --user start taskweft-mcp
 # The auth token is presented per-request by the caller, so the container holds
 # no GitHub secret — only the (non-secret) whitelist.
