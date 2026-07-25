@@ -5,12 +5,12 @@
 #
 # Build context is the taskweft monorepo root. The `taskweft_deploy` release
 # target (mix.exs) and its hosted-server source (lib/taskweft_deploy/) were
-# folded directly into this app -- previously a separate deploy/ Mix project
+# folded directly into this app — previously a separate deploy/ Mix project
 # with its own mix.exs/mix.lock, resolved independently from the root
 # app's own lock. That split let the two lockfiles desync (a taskweft_mcp
 # dependency bump landing in the root lock without the matching bump ever
-# reaching deploy/mix.lock, so production kept running a stale version
-# despite every surface-level deploy signal looking fine) -- one Mix
+# reaching the separate deploy/mix.lock, so production kept running a stale version
+# version despite every surface-level deploy signal looking fine) — one Mix
 # project, one mix.lock, removes that whole class of bug.
 
 # 1.18.x is the floor mix.exs actually requires (elixir: "~> 1.18", set when

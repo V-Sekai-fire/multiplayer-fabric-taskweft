@@ -2,16 +2,16 @@
 # TLS is terminated at Fly's edge (force_https); the app serves plain HTTP on 8080.
 # Scale-to-zero keeps idle cost near $0 (a 256mb shared-cpu-1x is ~$2/mo always-on).
 #
-# Lives at the monorepo root so the build context includes the whole repo —
-# deploy/Containerfile builds the single taskweft_deploy release target
-# straight out of this project's own mix.exs/mix.lock (see deploy/Containerfile
-# for why that used to be two separate Mix projects and no longer is).
+# Lives at the monorepo root so the build context includes the whole repo.
+# Containerfile builds the single taskweft_deploy release target straight
+# out of this project's own mix.exs/mix.lock (see Containerfile for why
+# that used to be two separate Mix projects and no longer is).
 
 app = "taskweft-mcp"
 primary_region = "sjc"
 
 [build]
-  dockerfile = "deploy/Containerfile"
+  dockerfile = "Containerfile"
 
 [env]
   PORT = "8080"
