@@ -156,19 +156,60 @@ defmodule Taskweft.Compose do
 
   # A variable list is keyed by "name", and not by position. A merge
   # that appended would give the planner two entries with one name.
+  #
+  # A shared name unions its "init" keys, and it does not replace them.
+  # Composition is the reason. Two stage documents that both declare
+  # `have` each speak about their own keys, and a whole-value replace
+  # would drop the keys of every document but the last. Every guard
+  # that read a dropped key then failed, and the planner answered
+  # no_plan with nothing to point at.
   defp merge_variables(base, overlay) do
     case Map.get(overlay, "variables") do
       nil ->
         base
 
       overlay_vars when is_list(overlay_vars) ->
-        base_vars = base |> Map.get("variables") |> List.wrap()
+        base_by_name = base |> Map.get("variables") |> List.wrap() |> index_by_name()
+
+        merged =
+          Enum.map(overlay_vars, fn overlay_var ->
+            case Map.fetch(base_by_name, Map.get(overlay_var, "name")) do
+              {:ok, base_var} -> merge_variable(base_var, overlay_var)
+              :error -> overlay_var
+            end
+          end)
+
         replaced = MapSet.new(overlay_vars, &Map.get(&1, "name"))
-        kept = Enum.reject(base_vars, &MapSet.member?(replaced, Map.get(&1, "name")))
-        Map.put(base, "variables", kept ++ overlay_vars)
+
+        kept =
+          base
+          |> Map.get("variables")
+          |> List.wrap()
+          |> Enum.reject(&MapSet.member?(replaced, Map.get(&1, "name")))
+
+        Map.put(base, "variables", kept ++ merged)
 
       _other ->
         base
+    end
+  end
+
+  defp index_by_name(vars) do
+    Map.new(vars, fn var -> {Map.get(var, "name"), var} end)
+  end
+
+  # The overlay's own fields win. Only "init" merges, and only when
+  # both sides are per-entity maps. A single-valued fluent replaces,
+  # because two scalars have nothing to union.
+  defp merge_variable(base_var, overlay_var) do
+    merged = Map.merge(base_var, overlay_var)
+
+    case {Map.get(base_var, "init"), Map.get(overlay_var, "init")} do
+      {%{} = base_init, %{} = overlay_init} ->
+        Map.put(merged, "init", Map.merge(base_init, overlay_init))
+
+      _other ->
+        merged
     end
   end
 

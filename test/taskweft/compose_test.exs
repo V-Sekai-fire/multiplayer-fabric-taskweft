@@ -148,4 +148,75 @@ defmodule Taskweft.ComposeTest do
       assert reason =~ "unknown format"
     end
   end
+
+  describe "compose/1 unions the keys of a shared variable" do
+    test "two documents that both declare a variable keep both key sets" do
+      base =
+        domain("base", %{
+          "variables" => [
+            %{"name" => "have", "type" => "bool", "init" => %{"source" => true, "done" => false}}
+          ]
+        })
+
+      stage =
+        domain("stage", %{
+          "variables" => [
+            %{"name" => "have", "type" => "bool", "init" => %{"mesh" => false}}
+          ]
+        })
+
+      assert {:ok, merged} = Compose.compose([base, stage])
+      have = Enum.find(merged["variables"], &(&1["name"] == "have"))
+
+      # Without this the stage wipes the base's keys, and every guard
+      # that reads them fails with no_plan.
+      assert have["init"] == %{"source" => true, "done" => false, "mesh" => false}
+    end
+
+    test "the later document wins a key they share" do
+      base =
+        domain("base", %{
+          "variables" => [%{"name" => "f", "type" => "ref", "init" => %{"out" => "glb"}}]
+        })
+
+      problem =
+        domain("problem", %{
+          "variables" => [%{"name" => "f", "type" => "ref", "init" => %{"out" => "vrm"}}]
+        })
+
+      assert {:ok, merged} = Compose.compose([base, problem])
+      f = Enum.find(merged["variables"], &(&1["name"] == "f"))
+      assert f["init"] == %{"out" => "vrm"}
+    end
+
+    test "a single-valued fluent replaces, and does not merge" do
+      base = domain("base", %{"variables" => [%{"name" => "n", "type" => "int", "init" => 1}]})
+      over = domain("over", %{"variables" => [%{"name" => "n", "type" => "int", "init" => 2}]})
+
+      assert {:ok, merged} = Compose.compose([base, over])
+      n = Enum.find(merged["variables"], &(&1["name"] == "n"))
+      assert n["init"] == 2
+    end
+
+    test "a variable only the base declares survives untouched" do
+      base =
+        domain("base", %{
+          "variables" => [
+            %{"name" => "kept", "type" => "bool", "init" => %{"x" => true}},
+            %{"name" => "shared", "type" => "bool", "init" => %{"y" => false}}
+          ]
+        })
+
+      over =
+        domain("over", %{
+          "variables" => [%{"name" => "shared", "type" => "bool", "init" => %{"z" => true}}]
+        })
+
+      assert {:ok, merged} = Compose.compose([base, over])
+      by_name = Map.new(merged["variables"], &{&1["name"], &1})
+
+      assert by_name["kept"]["init"] == %{"x" => true}
+      assert by_name["shared"]["init"] == %{"y" => false, "z" => true}
+    end
+  end
 end
