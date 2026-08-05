@@ -48,13 +48,53 @@ defmodule Taskweft.DSL do
   Returns {:ok, json_string} or {:error, reason} on failure.
   """
   @spec compile(String.t()) :: compile_result()
-  def compile(dsl_source) when is_binary(dsl_source) do
+  def compile(dsl_source) when is_binary(dsl_source), do: compile(dsl_source, [])
+
+  @doc """
+  Compile with options.
+
+  `:check_calls` decides whether a task calling an unknown name is an
+  error. It defaults to true. `Taskweft.Compose` passes false, because
+  a document meant for composition may call an action a sibling
+  defines. That check then runs once on the composed document, where
+  every name is present.
+  """
+  @spec compile(String.t(), keyword()) :: compile_result()
+  def compile(dsl_source, opts) when is_binary(dsl_source) and is_list(opts) do
+    alias Taskweft.DSL.Diagnostics
+
+    check_calls? = Keyword.get(opts, :check_calls, true)
+
+    with :ok <- Diagnostics.check_api(dsl_source),
+         {:ok, ast} <- parse(dsl_source),
+         {:ok, json} <- Taskweft.DSL.SafeParser.parse(ast),
+         :ok <- maybe_check_calls(json, check_calls?) do
+      {:ok, json}
+    else
+      {:error, %Jason.DecodeError{} = error} ->
+        {:error, "DSL error: parser produced invalid JSON: #{Exception.message(error)}"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp maybe_check_calls(_json, false), do: :ok
+
+  defp maybe_check_calls(json, true) do
+    case Jason.decode(json) do
+      {:ok, document} -> Taskweft.DSL.Diagnostics.check_calls(document)
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp parse(dsl_source) do
     case Code.string_to_quoted(dsl_source) do
       {:ok, ast} ->
-        Taskweft.DSL.SafeParser.parse(ast)
+        {:ok, ast}
 
-      {:error, {_line, error, _token}} ->
-        {:error, "DSL syntax error: #{error}"}
+      {:error, detail} ->
+        {:error, Taskweft.DSL.Diagnostics.syntax_error(detail, dsl_source)}
     end
   end
 end

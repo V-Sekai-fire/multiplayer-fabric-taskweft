@@ -92,7 +92,8 @@ defmodule Taskweft.Compose do
     base_format = Keyword.get(opts, :base_format, format)
 
     with {:ok, documents} <- decode_all(sources, format, base_format),
-         {:ok, merged} <- compose(documents) do
+         {:ok, merged} <- compose(documents),
+         :ok <- Taskweft.DSL.Diagnostics.check_calls(merged) do
       case Jason.encode(merged) do
         {:ok, json} -> {:ok, json}
         {:error, error} -> {:error, "compose: encode failed: #{Exception.message(error)}"}
@@ -120,7 +121,10 @@ defmodule Taskweft.Compose do
   end
 
   defp decode(source, "dsl", index) do
-    with {:ok, json} <- wrap(DSL.compile(source), index),
+    # check_calls: false, because a document meant for composition
+    # may call an action a sibling defines. The check runs once on
+    # the composed document instead.
+    with {:ok, json} <- wrap(DSL.compile(source, check_calls: false), index),
          {:ok, document} <- wrap(Jason.decode(json), index) do
       {:ok, document}
     end
