@@ -192,7 +192,7 @@ Later documents win, so the fold order carries meaning:
 
 | Field | Rule |
 |-------|------|
-| `variables` | Merge by `name`. The later one replaces. |
+| `variables` | Merge by `name`. `init` unions its keys, and the later one wins a shared key. |
 | `actions` | Merge by key. The later one replaces. |
 | `methods` | Merge by key. The later one replaces. |
 | `goal_methods` | Merge by key. The later one replaces. |
