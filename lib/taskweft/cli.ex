@@ -221,7 +221,7 @@ defmodule Taskweft.CLI do
          {:ok, problem_body} <- read_pair_problem(problem_path),
          {:ok, domain} <- decode(domain_path, domain_body),
          {:ok, problem} <- decode(problem_path, problem_body) do
-      encode(merge(domain, problem))
+      compose([domain, problem])
     end
   end
 
@@ -247,44 +247,12 @@ defmodule Taskweft.CLI do
     end
   end
 
-  # State from the problem overrides the domain; methods/actions/goal_methods
-  # extend or override; a non-empty problem task list replaces the domain's.
-  defp merge(domain, problem) do
-    domain
-    |> merge_variables(problem)
-    |> merge_map_field(problem, "methods")
-    |> merge_map_field(problem, "actions")
-    |> merge_map_field(problem, "goal_methods")
-    |> merge_tasks(problem)
-  end
-
-  defp merge_variables(domain, problem) do
-    case {Map.get(domain, "variables"), Map.get(problem, "variables")} do
-      {_, nil} ->
-        domain
-
-      {dom_vars, prob_vars} when is_list(prob_vars) ->
-        dom_vars = List.wrap(dom_vars)
-        overridden = MapSet.new(prob_vars, &Map.get(&1, "name"))
-        kept = Enum.reject(dom_vars, &MapSet.member?(overridden, Map.get(&1, "name")))
-        Map.put(domain, "variables", kept ++ prob_vars)
-    end
-  end
-
-  defp merge_map_field(domain, problem, key) do
-    case Map.get(problem, key) do
-      value when is_map(value) ->
-        Map.put(domain, key, Map.merge(Map.get(domain, key, %{}), value))
-
-      _ ->
-        domain
-    end
-  end
-
-  defp merge_tasks(domain, problem) do
-    case Map.get(problem, "todo_list") do
-      tasks when is_list(tasks) and tasks != [] -> Map.put(domain, "todo_list", tasks)
-      _ -> domain
+  # Taskweft.Compose owns these rules. The CLI held a private copy
+  # before, and a caller with three documents could not reach it.
+  defp compose(documents) do
+    case Taskweft.Compose.compose(documents) do
+      {:ok, merged} -> encode(merged)
+      {:error, reason} -> {:error, "taskweft: #{reason}", 1}
     end
   end
 

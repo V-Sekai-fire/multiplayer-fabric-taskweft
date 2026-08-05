@@ -176,6 +176,42 @@ env["fail_step"]       == -1
 env["completed_steps"] == length(Jason.decode!(plan_json))
 ```
 
+## Composing several documents
+
+`Taskweft.Compose.compose/1` folds a list of documents into one, left
+to right. `Taskweft.Compose.compose_strings/2` does the same for source
+strings, in either format.
+
+A pipeline that runs several models is several domains. Each one owns
+its own actions and its own guards, and each one reads alone. Compose
+them and the planner sees one document. The alternative is one large
+domain per pipeline, and two pipelines that share a stage then keep two
+copies of it.
+
+Later documents win, so the fold order carries meaning:
+
+| Field | Rule |
+|-------|------|
+| `variables` | Merge by `name`. The later one replaces. |
+| `actions` | Merge by key. The later one replaces. |
+| `methods` | Merge by key. The later one replaces. |
+| `goal_methods` | Merge by key. The later one replaces. |
+| `todo_list` | A non-empty list replaces. An empty one keeps. |
+| everything else | The first document's value stands. |
+
+A problem is an ordinary document under these rules, thus
+`compose([domain, problem])` gives what `--problem` gives. The CLI takes
+that path now, and it holds no rules of its own.
+
+Over MCP, the `overlays` parameter on `plan` and on `validate` takes the
+documents to compose over `domain_dsl`:
+
+```json
+{"domain_dsl": "<base domain>",
+ "overlays": ["<stage domain>", "<problem>"],
+ "format": "dsl"}
+```
+
 ## See also
 
 - [ADR 0001](https://github.com/taskweft/taskweft/blob/main/docs/adr/0001-gltf-interactivity-node-shape.md) — the action-body node shape (`eval` + `pointer/set`).
