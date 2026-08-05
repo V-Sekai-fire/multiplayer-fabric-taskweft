@@ -50,6 +50,21 @@ defmodule Taskweft.MCP.Server do
       description: "Parse format - 'dsl' for Elixir DSL or 'json' for JSON-LD"
     )
 
+    param(:overlays, {:array, :string},
+      description: """
+      More documents to compose over `domain_dsl`, applied left to right.
+
+      Use this to keep one domain per concern instead of one large
+      domain per pipeline. A problem is an ordinary overlay: pass the
+      domain as `domain_dsl` and the problem here.
+
+      Later documents win. `variables` merge by name, `actions`,
+      `methods`, and `goal_methods` merge by key, and a non-empty
+      `todo_list` replaces the one before it. Every document must use
+      the format named by `format`.
+      """
+    )
+
     param(:explain, :boolean,
       default: false,
       description: "If true, include explain tree in the plan response"
@@ -68,6 +83,7 @@ defmodule Taskweft.MCP.Server do
       with {:ok, raw} <- fetch_param(args, :domain_dsl),
            {:ok, domain_dsl} <-
              parse_domain_input(raw, Map.get(args, :format, "dsl")),
+           {:ok, domain_dsl} <- apply_overlays(domain_dsl, args),
            {:ok, validated} <- validate_domain(domain_dsl),
            explain = Map.get(args, :explain, false) do
         case Map.get(args, :plan_json) do
@@ -98,10 +114,26 @@ defmodule Taskweft.MCP.Server do
       description: "Parse format - 'dsl' for Elixir DSL or 'json' for JSON-LD"
     )
 
+    param(:overlays, {:array, :string},
+      description: """
+      More documents to compose over `domain_dsl`, applied left to right.
+
+      Use this to keep one domain per concern instead of one large
+      domain per pipeline. A problem is an ordinary overlay: pass the
+      domain as `domain_dsl` and the problem here.
+
+      Later documents win. `variables` merge by name, `actions`,
+      `methods`, and `goal_methods` merge by key, and a non-empty
+      `todo_list` replaces the one before it. Every document must use
+      the format named by `format`.
+      """
+    )
+
     handle(fn args, _state ->
       with {:ok, raw} <- fetch_param(args, :domain_dsl),
            {:ok, domain_dsl} <-
              parse_domain_input(raw, Map.get(args, :format, "dsl")),
+           {:ok, domain_dsl} <- apply_overlays(domain_dsl, args),
            {:ok, validated} <- validate_domain(domain_dsl) do
         {:ok, tool_text(validated)}
       else
@@ -114,6 +146,33 @@ defmodule Taskweft.MCP.Server do
 
   # Parse raw input string into a domain JSON string.
   # Accepts 'dsl' or 'json'.
+  # Composes the overlay documents over the base. Taskweft.Compose owns
+  # the rules. With no overlays this returns the base untouched, so the
+  # single-document path costs nothing.
+  defp apply_overlays(domain_json, args) do
+    case Map.get(args, :overlays) || Map.get(args, "overlays") do
+      nil ->
+        {:ok, domain_json}
+
+      [] ->
+        {:ok, domain_json}
+
+      overlays when is_list(overlays) ->
+        format = Map.get(args, :format, "dsl")
+
+        case Taskweft.Compose.compose_strings([domain_json | overlays],
+               format: format,
+               base_format: "json"
+             ) do
+          {:ok, json} -> {:ok, json}
+          {:error, reason} -> {:error, reason}
+        end
+
+      other ->
+        {:error, "overlays must be a list of strings, got #{inspect(other)}"}
+    end
+  end
+
   defp parse_domain_input(raw, "json") when is_binary(raw) do
     # Validate JSON but pass through the JSON string
     case Jason.decode(raw) do
