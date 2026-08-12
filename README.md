@@ -31,6 +31,10 @@ for a working example.
 
 ## Project status
 
-This planner is being replaced by the s7-Lisp-in-libriscv stack from
-[weft-warp-loop](https://github.com/weftspun/weft-warp-loop). Bug fixes and
-small improvements still accepted; new features should target the replacement.
+Maintained, and the planner to build against.
+
+This section used to send new work to the s7-Lisp-in-libriscv stack in
+[weft-warp-loop](https://github.com/weftspun/weft-warp-loop). That stack is
+abandoned, so the replacement it pointed at is not coming and the advice had
+outlived the plan: a reader following it would have started on something with
+no maintainer instead of on this.
