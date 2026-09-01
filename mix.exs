@@ -9,6 +9,9 @@ defmodule Taskweft.MixProject do
       version: @version,
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
+      compilers: [:elixir_make] ++ Mix.compilers(),
+      make_targets: ["all"],
+      make_clean: ["clean"],
       deps: deps(),
       releases: releases(),
       dialyzer: [plt_add_apps: [:mix], ignore_warnings: ".dialyzer_ignore.exs"],
@@ -128,6 +131,7 @@ defmodule Taskweft.MixProject do
 
   defp deps do
     [
+      {:elixir_make, "~> 0.9", runtime: false},
       {:taskweft_nif, "~> 0.2.0-dev"},
       {:taskweft_rebac, "~> 0.2.0-dev"},
       {:taskweft_mcp_client, "~> 0.2.0-dev"},

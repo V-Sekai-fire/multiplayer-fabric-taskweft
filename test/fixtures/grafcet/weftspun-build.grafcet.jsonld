@@ -1,0 +1,34 @@
+{
+  "@context": {
+    "@version": 1.1,
+    "grafcet": "https://project-agrafe.github.io/ns/grafcet#",
+    "sfc":   { "@id": "grafcet:name" },
+    "descr": { "@id": "grafcet:description" },
+    "V":     { "@id": "grafcet:internalVariables", "@container": "@index" },
+    "S":     { "@id": "grafcet:steps",             "@container": "@list"  },
+    "^":  "grafcet:InitialStep",
+    "%":  "grafcet:MacroStep",
+    "#":  "grafcet:EnclosingStep",
+    "&>": "grafcet:AndDivergence",
+    "&<": "grafcet:AndConvergence",
+    "|>": "grafcet:OrDivergence",
+    "|<": "grafcet:OrConvergence",
+    "!>": "grafcet:ForcingOrder"
+  },
+  "@type": "grafcet:SFC",
+  "sfc": "weftspun_hexagonal_buildout",
+  "descr": "IEC 60848 SFC for building the weftspun org's hexagonal clusters. Each step scaffolds + tests + ships one Elixir/Burrito repo (core/ports/adapters), MIT-OR-Apache-2.0 + SPDX. Initial marking records completed work through V.*. Downstream steps gate on the activity of the steps they depend on. Ingest, embedder, render and slat run in AND-parallel after lake; oracle joins ingest, embedder, slat and phenotype.",
+  "V": { "lake": 0, "ingest": 0, "embedder": 0, "render": 0, "slat": 0, "phenotype": 0, "oracle": 0 },
+  "S": [
+    ["^"],
+    ["lake",      "",         "V.lake:=1",      "1h"],
+    ["&>", "ingest", "embedder", "render", "slat"],
+    ["ingest",    "",         "V.ingest:=1",    "1h"],
+    ["embedder",  "",         "V.embedder:=1",  "2h"],
+    ["render",    "",         "V.render:=1",    "2h"],
+    ["slat",      "",         "V.slat:=1",      "2h"],
+    ["phenotype", "X.render", "V.phenotype:=1", "3h"],
+    ["&<", "ingest", "embedder", "slat", "phenotype"],
+    ["oracle",    "",         "V.oracle:=1",    "3h"]
+  ]
+}

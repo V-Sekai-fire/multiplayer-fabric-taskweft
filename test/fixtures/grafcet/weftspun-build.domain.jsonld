@@ -1,0 +1,38 @@
+{
+  "@context": {"weftspun": "https://github.com/weftspun/", "domain": "weftspun:planning/domain/"},
+  "@type": "domain:Definition",
+  "name": "weftspun_hexagonal_buildout",
+  "description": "HTN plan (taskweft) for building the weftspun org's hexagonal clusters. Each action = scaffold + test + ship one Elixir/Burrito repo (core/ports/adapters), MIT-OR-Apache-2.0 + SPDX. done/* seeds completed work. Dependencies follow the ETNF wiring: everything writes to / reads from `essential-tuple-lake` (the store at the bottom of the stack). ML clusters embed Python via Pythonx and native Lean/C via Fine; pure-Elixir clusters (lake, ingest) use Explorer. taskweft-nif #50 phase-3 syntax: guards are `{eval: {type: math/eq, a: {type: pointer/get, pointer}, b}}`, mutations are `{pointer/set, value}`.",
+  "variables": [
+    {"name": "done", "init": {
+      "lake": true,
+      "ingest": true,
+      "embedder": false,
+      "render": false,
+      "slat": false,
+      "phenotype": false,
+      "oracle": false
+    }}
+  ],
+  "actions": {
+    "a_lake":      {"params": [], "duration": "PT1H", "platform": "elixir", "repo": "essential-tuple-lake",  "body": [{"pointer/set": "/done/lake", "value": true}]},
+    "a_ingest":    {"params": [], "duration": "PT1H", "platform": "elixir", "repo": "corpus-relation-ingest", "body": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/lake"}, "b": true}}, {"pointer/set": "/done/ingest", "value": true}]},
+    "a_embedder":  {"params": [], "duration": "PT2H", "platform": "pythonx", "repo": "unified-modal-embedder", "body": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/lake"}, "b": true}}, {"pointer/set": "/done/embedder", "value": true}]},
+    "a_render":    {"params": [], "duration": "PT2H", "platform": "pythonx", "repo": "headless-viser-render",  "body": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/lake"}, "b": true}}, {"pointer/set": "/done/render", "value": true}]},
+    "a_slat":      {"params": [], "duration": "PT2H", "platform": "pythonx", "repo": "voxel-slat-encoder",     "body": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/lake"}, "b": true}}, {"pointer/set": "/done/slat", "value": true}]},
+    "a_phenotype": {"params": [], "duration": "PT3H", "platform": "fine",    "repo": "pose-anny-phenotype",    "body": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/lake"}, "b": true}}, {"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/render"}, "b": true}}, {"pointer/set": "/done/phenotype", "value": true}]},
+    "a_oracle":    {"params": [], "duration": "PT3H", "platform": "pythonx", "repo": "semantic-code-oracle",   "body": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/lake"}, "b": true}}, {"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/ingest"}, "b": true}}, {"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/embedder"}, "b": true}}, {"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/slat"}, "b": true}}, {"pointer/set": "/done/oracle", "value": true}]}
+  },
+  "methods": {
+    "m_lake":      {"params": [], "alternatives": [{"name": "skip", "check": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/lake"},      "b": true}}], "subtasks": []}, {"name": "do", "subtasks": [["a_lake"]]}]},
+    "m_ingest":    {"params": [], "alternatives": [{"name": "skip", "check": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/ingest"},    "b": true}}], "subtasks": []}, {"name": "do", "subtasks": [["a_ingest"]]}]},
+    "m_embedder":  {"params": [], "alternatives": [{"name": "skip", "check": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/embedder"},  "b": true}}], "subtasks": []}, {"name": "do", "subtasks": [["a_embedder"]]}]},
+    "m_render":    {"params": [], "alternatives": [{"name": "skip", "check": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/render"},    "b": true}}], "subtasks": []}, {"name": "do", "subtasks": [["a_render"]]}]},
+    "m_slat":      {"params": [], "alternatives": [{"name": "skip", "check": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/slat"},      "b": true}}], "subtasks": []}, {"name": "do", "subtasks": [["a_slat"]]}]},
+    "m_phenotype": {"params": [], "alternatives": [{"name": "skip", "check": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/phenotype"}, "b": true}}], "subtasks": []}, {"name": "do", "subtasks": [["a_phenotype"]]}]},
+    "m_oracle":    {"params": [], "alternatives": [{"name": "skip", "check": [{"eval": {"type": "math/eq", "a": {"type": "pointer/get", "pointer": "/done/oracle"},    "b": true}}], "subtasks": []}, {"name": "do", "subtasks": [["a_oracle"]]}]},
+
+    "buildout": {"params": [], "alternatives": [{"name": "do", "subtasks": [["m_lake"], ["m_ingest"], ["m_embedder"], ["m_render"], ["m_slat"], ["m_phenotype"], ["m_oracle"]]}]}
+  },
+  "tasks": [["buildout"]]
+}

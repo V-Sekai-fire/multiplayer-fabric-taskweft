@@ -1,0 +1,28 @@
+{
+  "@context": {
+    "@version": 1.1,
+    "grafcet": "https://project-agrafe.github.io/ns/grafcet#",
+    "sfc":   { "@id": "grafcet:name" },
+    "descr": { "@id": "grafcet:description" },
+    "V":     { "@id": "grafcet:internalVariables", "@container": "@index" },
+    "S":     { "@id": "grafcet:steps",             "@container": "@list"  },
+    "^":  "grafcet:InitialStep",
+    "&>": "grafcet:AndDivergence",
+    "&<": "grafcet:AndConvergence",
+    "|>": "grafcet:OrDivergence",
+    "|<": "grafcet:OrConvergence"
+  },
+  "@type": "grafcet:SFC",
+  "sfc": "blocks_get_or",
+  "descr": "Minimal OR-divergence fixture: after `find`, the persona either `pickup_from_table` (when the block is on the table) or `unstack` (otherwise). Direct analogue of blocks_world's `get` method with two alternatives.",
+  "V": { "found": 0, "picked": 0, "unstacked": 0, "done": 0 },
+  "S": [
+    ["^"],
+    ["find",              "",         "V.found:=1",      "1h"],
+    ["|>", "pickup_from_table", "unstack"],
+    ["pickup_from_table", "X.found", "V.picked:=1",    "1h"],
+    ["unstack",           "X.found", "V.unstacked:=1", "1h"],
+    ["|<"],
+    ["mark_done",         "",         "V.done:=1",       "1h"]
+  ]
+}
